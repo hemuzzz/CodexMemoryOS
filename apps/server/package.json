@@ -1,0 +1,41 @@
+{
+  "name": "@codex-memory-os/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22.16.0"
+  },
+  "scripts": {
+    "asset:confirm": "node dist/asset/confirm-cli.js",
+    "build": "tsc --project tsconfig.build.json",
+    "dev": "tsx watch src/main.ts",
+    "hook:user-prompt-submit": "node dist/hook/user-prompt-submit.js",
+    "smoke:asset-confirm:build": "node test-support/asset-confirm-build-smoke.mjs",
+    "smoke:hub:build": "node test-support/hub-build-smoke.mjs",
+    "smoke:mcp:build": "node test-support/mcp-build-smoke.mjs",
+    "smoke:n13:e2e:build": "node test-support/n13-e2e-build-smoke.mjs",
+    "start": "node dist/main.js",
+    "smoke:rest:build": "node test-support/rest-build-smoke.mjs",
+    "test": "tsx --test --test-concurrency=1 test/*.test.ts",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@codex-memory-os/id-generator": "workspace:*",
+    "@hono/node-server": "2.1.1",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "better-sqlite3": "12.11.1",
+    "chokidar": "5.0.0",
+    "gray-matter": "4.0.3",
+    "hono": "4.13.5",
+    "markdown-it": "14.1.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
+    "@types/markdown-it": "14.1.2",
+    "@types/node": "22.20.0",
+    "tsx": "4.23.13",
+    "typescript": "6.0.3"
+  }
+}

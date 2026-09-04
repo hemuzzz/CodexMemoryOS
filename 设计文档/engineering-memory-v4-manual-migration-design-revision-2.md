@@ -1,0 +1,780 @@
+# Engineering Memory V4 → CodexMemoryOS 人工整理设计（Revision 2.1）
+
+> 文档状态：实施基线
+> 文档版本：Revision 2.1
+> 处理方式：Codex 整理 + 用户逐条审核 + 生成新 Asset  
+> 目标系统：CodexMemoryOS Revision 2.1
+> 替代文档：`engineering-memory-v4-to-next-migration-design.md`（Revision 1，不再作为实施基线）
+
+---
+
+## 0. 定位
+
+本文虽然沿用“迁移”一词，但实际不是复杂的数据迁移工程。
+
+> 旧 Engineering Memory V4 只是一批待整理的知识来源。系统先全量盘点源文件、按 Exact Hash 去重并按 Workspace + 主题聚类；Codex 再形成“当前知识”审核项，用户逐项决定保留、合并、改写或丢弃，最后生成全新的 Asset。
+
+不追求：
+
+- 保留 V4 的完整领域模型；
+- 保留旧版本演进；
+- 证明旧 HumanReview 与新 Asset 等价；
+- 迁移旧 Relation、Receipt、Audit、Transaction；
+- 迁移旧 Usage；
+- 建立迁移运行、回滚、Shadow、断点续传平台；
+- 让旧系统在失败后继续提供正式服务。
+
+旧文档不会因整理失败自动删除。任何条目有问题，重新整理该条即可。
+
+
+---
+
+## 1. Human-First 原则
+
+1. Codex 负责读取、提取、Exact Hash 去重、按 Workspace + 主题聚类和提出建议。
+2. 每个旧知识源文件都必须进入 Inventory 并具有明确 disposition；去重聚类后的每个当前知识审核项都必须进入审核文档，不能因 Codex 判断“低价值”而静默省略。
+3. 用户逐条决定：
+   - `KEEP`
+   - `MERGE`
+   - `REWRITE`
+   - `DROP`
+4. 旧系统中的 accepted、effective、legacy、pending 等状态只作为参考，不自动决定新系统结果。
+5. 没有用户明确决定的条目保持 `PENDING`，不能生成正式 Asset。
+6. 新 Asset 只表示用户现在仍然认可和需要的知识。
+7. 新系统不继承旧 ID、旧确认、旧 Usage 和旧审计关系。
+8. 新 Asset 使用新系统统一 IdGenerator 生成 `ast` 前缀 Snowflake ID。
+9. 所有生成结果先进入 `inbox/`。
+10. 用户完成最终检查后，才允许移动到 `assets/`。
+
+---
+
+## 2. 处理范围
+
+### 2.1 必须列入审核文档
+
+#### A. 所有旧 Memory 内容源
+
+包括：
+
+- 所有 V4 `MemoryVersion`；
+- Legacy Version；
+- superseded Version；
+- 当前 Candidate；
+- 仍可读取的旧知识正文。
+
+规则：
+
+- 所有源文件先进入全量 Inventory；
+- `MemoryItem`、Reference、Relation、HumanReview 和旧状态只帮助理解主题、来源、互补与冲突，不复制为新系统对象；
+- Exact Hash 相同的文件只形成一个完整内容视图，但 Inventory 必须列全所有来源；
+- 多个 Version 表达同一当前判断时可以聚合为一个审核项；
+- 一个 Version 包含多个独立判断时可以拆成多个审核项；
+- 近重复、互补和冲突必须在审核项中显式展示，不能由 Codex 静默裁决；
+- 审核编号分配给去重聚类后的当前知识审核项，不直接分配给每个源文件。
+
+#### B. 旧项目和个人文档
+
+包括有机会成为新 `DOCUMENT Asset` 的内容：
+
+- 项目专属设计文档；
+- 架构文档；
+- 技术方案；
+- 故障复盘；
+- 长期维护说明；
+- 跨项目通用技术文档。
+
+旧项目和个人文档只扫描用户明确给出的源目录 allowlist。Codex 先做全量文件盘点，再将具有长期知识价值的内容纳入去重聚类；未提供的外部根目录保持 UNKNOWN，不自行扩大扫描范围。
+
+#### C. 可能成为 Skill 的内容
+
+旧系统当前没有正式 Skill Asset，但如果某段 Memory 或 Document 明显是一套可重复执行的方法，可以建议目标类型为 `SKILL`。
+
+这只改变新 Asset 类型，不实现 Skill 安装或执行能力。
+
+### 2.2 不处理
+
+以下内容不进入人工知识审核：
+
+- SQLite Catalog 行；
+- 旧 Usage 计数；
+- Recall / Read / Used 历史；
+- Receipt；
+- Audit；
+- Transaction History；
+- Migration Manifest；
+- Generated Graph；
+- Obsidian 配置；
+- `.idea`、缓存、日志；
+- CodeGraph；
+- 全量 Codex 对话正文；
+- Hook、MCP、Python Runtime 源码本身；
+- 可从当前项目代码低成本获得的普通实现事实；
+- 测试日志和普通开发流水。
+
+若其中某份文件本身包含有长期价值的设计判断，Codex 应提取其知识内容作为审核条目，而不是把运行文件整体迁入。
+
+---
+
+## 3. 输出物
+
+整理过程使用普通临时文件，不建立数据库或迁移运行模型。
+
+```text
+migration/
+├── v4-knowledge-review.md
+├── review-batches/
+│   ├── <workspace>-01.md
+│   └── <workspace>-02.md
+├── v4-source-inventory.json
+└── v4-generation-report.md
+```
+
+### 3.1 `v4-source-inventory.json`
+
+机器可读的临时盘点：
+
+- 旧文件路径；
+- 内容 Hash；
+- 来源类别；
+- 标题；
+- Workspace；
+- 是否成功读取；
+- Exact Hash 去重组；
+- disposition；
+- 对应审核编号列表。
+
+它不进入新系统核心模型，也不成为 Asset 字段。
+
+### 3.2 `v4-knowledge-review.md`
+
+人工作业总索引，只保存统计、Workspace/批次导航和审核决定汇总。具体审核项可以按 Workspace 或固定条数拆分到 `review-batches/`；它们只是普通 Markdown 文件，不是运行模型。
+
+### 3.3 `v4-generation-report.md`
+
+记录：
+
+- 每个审核条目的最终决定；
+- 每个源文件的最终 disposition；
+- 生成了哪个新 Asset；
+- 合并了哪些审核条目；
+- 哪些条目被 Drop；
+- 哪些生成失败；
+- 最终校验结果。
+
+这不是迁移 Receipt，只是普通可读报告。
+
+---
+
+## 4. 审核文档格式
+
+### 4.1 文档头
+
+```markdown
+# V4 旧知识人工审核
+
+> Inventory 源文件总数：
+> Exact Hash 去重后内容数：
+> 当前知识审核项总数：
+> 已处理：
+> 待处理：
+> KEEP：
+> MERGE：
+> REWRITE：
+> DROP：
+> 审核批次：
+```
+
+### 4.2 单条模板
+
+```markdown
+## REV-0001：<当前知识主题>
+
+### 来源信息
+
+- 审核编号：REV-0001
+- Workspace：xm-ai-job
+- 来源引用：<一个或多个 source path + source category + SHA-256>
+- Exact Hash 重复来源：
+- 原状态参考：仅供参考，不决定结果
+- 建议目标类型：MEMORY / DOCUMENT / SKILL
+- Codex 建议：KEEP / MERGE / REWRITE / DROP
+- Codex 建议理由：
+- 与其他审核项的互补关系：
+- 冲突或待核实差异：
+- 可拆分内容：
+
+### 拟保留的当前内容草稿
+
+<由来源提炼出的完整候选内容；不得把无依据补充写成事实>
+
+### 来源对照与整理说明
+
+<说明 exact duplicate、近重复、互补、冲突、拆分或合并依据；源文件保持原地并可按路径读取>
+
+### 用户决定
+
+- 决定：PENDING
+- 目标类型：
+- 目标 Scope：GLOBAL / WORKSPACE
+- 目标 Workspace：
+- 目标标题：
+- 合并到：
+- 改写要求：
+- 补充说明：
+```
+
+### 4.3 审核要求
+
+1. Inventory 必须覆盖每个允许范围内的源文件，读取失败也要显式记录。
+2. Exact duplicate 只需展示一次完整内容，但必须列全所有来源路径。
+3. 近重复、互补与冲突不能只给结论，必须展示影响当前判断的差异。
+4. 每个审核项包含一份可供用户判断的完整当前内容草稿，不要求重复复制每个旧原文；旧源文件在整理期间保持不动并可按路径打开。
+5. Codex 建议和用户决定必须分开，用户决定默认是 `PENDING`。
+6. Codex 不得替用户填写最终决定，也不得用旧 accepted、effective、pending、legacy 状态自动决定 KEEP 或 DROP。
+7. `source.reviewIds[]` 与 `review.sourceRefs[]` 必须双向覆盖，防止源文件在聚类后静默丢失。
+8. 主审核索引只保存统计和批次链接；批次按 Workspace 或固定条数拆分，便于用户逐批审核。
+
+### 4.4 固定整理流程
+
+```text
+旧知识文件全量盘点
+→ Exact Hash 去重
+→ 按 Workspace + 主题聚类
+→ Codex 标记重复、互补、冲突和可拆分内容
+→ 生成当前知识审核项
+→ 用户逐项 KEEP / MERGE / REWRITE / DROP
+→ 生成新的 Inbox Asset
+→ 用户检查
+→ 进入 assets
+```
+
+Codex 只负责整理和建议，用户负责最终决定。去重与聚类用于减少重复审核，不改变 Human-First 边界。
+
+---
+
+## 5. 四种人工决定
+
+### 5.1 KEEP
+
+含义：
+
+- 当前内容仍然有用；
+- 基本不需要改变语义；
+- 生成一个新的 Asset 候选。
+
+处理：
+
+```text
+当前知识审核项
+→ 新 ast ID
+→ 生成 inbox Asset
+```
+
+### 5.2 MERGE
+
+含义：
+
+- 多条旧知识应合并成一个当前 Asset。
+
+规则：
+
+1. 每个参与合并的审核项都必须明确选择 MERGE；
+2. `合并到` 指向同一个审核组；
+3. Codex 根据用户要求生成一个新候选；
+4. 合并后的正文必须重新给用户检查；
+5. 不在新 Asset 中保留旧 Version、Relation 或 legacy ID。
+
+### 5.3 REWRITE
+
+含义：
+
+- 原知识有价值，但当前表达、范围或结论需要重写。
+
+规则：
+
+- 用户在 `改写要求` 中说明方向；
+- Codex 生成新的完整 Asset；
+- 新内容先进入 `inbox/`；
+- 未最终确认前不进入正式搜索。
+
+### 5.4 DROP
+
+含义：
+
+- 现在不再需要；
+- 可以从当前代码或文档低成本恢复；
+- 内容重复；
+- 内容错误或过时；
+- 没有长期价值。
+
+处理：
+
+- 不生成新 Asset；
+- 只在生成报告中记录已 Drop；
+- 不设计 Archive、Legacy Store 或恢复逻辑。
+
+拆分不是第五种用户决定。Codex 在审核前把一个来源中的独立判断拆成多个审核项，用户仍分别使用上述四种决定。
+
+---
+
+## 6. 新 Asset 分类规则
+
+### 6.1 MEMORY
+
+适合：
+
+- 一条明确规则；
+- 一项仍然有效的设计决定；
+- 一个经过验证的故障经验；
+- 一个不能轻易从代码恢复的约束；
+- 一段未来容易重复踩坑的判断。
+
+建议保持聚焦，一个 Asset 不要混入大量互不相关的判断。
+
+### 6.2 DOCUMENT
+
+适合：
+
+- 完整技术方案；
+- 系统架构说明；
+- 项目专属设计；
+- 复杂背景、方案比较和整体流程；
+- 故障复盘；
+- 长期维护说明。
+
+项目专属文档直接进入对应 Workspace 的 Document Asset，不再讨论代码仓库、doc 分支或 Commit 配对。
+
+### 6.3 SKILL
+
+适合：
+
+- 面对一类任务可以反复执行；
+- 有步骤、判断、检查或验证方法；
+- 有明确输入和预期结果。
+
+当前只作为普通 Markdown Asset，不安装到 Codex Skill 目录。
+
+### 6.4 Scope
+
+- 跨项目通用：`GLOBAL`
+- 只适用于某个项目：`WORKSPACE`
+
+“工程通用”“产品通用”“测试通用”不新增 Asset 类型，可以通过 GLOBAL 内容的标题和目录表达。
+
+---
+
+## 7. 新 Asset 生成
+
+### 7.1 前置条件
+
+只有满足以下条件才生成：
+
+1. 审核决定不是 PENDING；
+2. 决定为 KEEP、MERGE 或 REWRITE；
+3. 目标类型明确；
+4. 目标 Scope 明确；
+5. WORKSPACE 类型已填写 Workspace；
+6. 合并组中的所有相关条目均已处理。
+
+### 7.2 ID
+
+生成时调用新系统统一 IdGenerator：
+
+```text
+ast + Snowflake decimal
+```
+
+例如：
+
+```text
+ast2034512345678901248
+```
+
+ID 匹配 `^ast[0-9]+$`，前缀与 Snowflake 十进制字符串之间不使用下划线。生成器必须遵守主设计 Revision 2.1 的开源 Snowflake、单机生成、字符串边界、时钟回退不重复、并发唯一性和 BigInt JSON 约束；整理流程不得自行拼接 ID。
+
+旧系统 ID、旧 Version ID 和审核编号不进入新 Asset Frontmatter。
+
+### 7.3 目标路径
+
+```text
+inbox/global/memories/
+inbox/global/documents/
+inbox/global/skills/
+
+inbox/workspaces/<workspace>/memories/
+inbox/workspaces/<workspace>/documents/
+inbox/workspaces/<workspace>/skills/
+```
+
+路径与 Frontmatter 必须一致：
+
+- `scope = GLOBAL`：不填写 `workspace`，文件位于 `inbox/global/<type>/`；
+- `scope = WORKSPACE`：Workspace 必须存在于配置，文件位于 `inbox/workspaces/<workspace>/<type>/`。
+
+未知 Workspace、路径与 Frontmatter 不一致、重复 Asset ID、未知类型、Frontmatter 无效、非普通单 Markdown 文件或 Symlink 均不得进入 Catalog/FTS 或后续 Search/Read；文件保留并在 System Status 展示错误。
+
+### 7.4 Frontmatter
+
+```yaml
+---
+id: ast2034512345678901248
+type: MEMORY
+scope: WORKSPACE
+workspace: xm-ai-job
+title: 充值回调幂等规则
+summary: 充值回调必须避免重复通知造成重复入账
+---
+```
+
+不写入：
+
+```text
+legacy_source_id
+old_memory_id
+old_version_id
+old_review_id
+migration_run_id
+old_usage
+old_relation
+old_status
+```
+
+### 7.5 生成原则
+
+- KEEP 可以保留原文，也可以做不改变意义的格式整理；
+- MERGE 和 REWRITE 必须明显标注为新的 Codex 草稿；
+- Codex 不得为了让内容“更完整”添加旧来源中没有依据的事实；
+- 无法判断的内容写入审核备注，不自行补齐；
+- Asset Summary 必须简短，不能替代正文；
+- 一个新 Asset 可以来自一个或多个审核条目；
+- 一个旧条目也可以在用户明确要求下拆成多个 Asset。
+
+---
+
+## 8. 最终确认
+
+Hub MVP 当前只读，因此最终确认采用以下任一方式：
+
+### 方式 A：Codex 对话确认
+
+1. Codex 展示生成的 Inbox Asset；
+2. 用户明确回复确认；
+3. Codex 调用受控命令移动文件；
+4. 系统比较移动前后 SHA-256；
+5. 文件进入 `assets/` 并重新索引。
+
+### 方式 B：用户手工移动
+
+用户在 IDEA 或文件系统中将文件从 `inbox/` 移动到 `assets/`。
+
+文件监听器自动重新索引。
+
+### 规则
+
+- 未明确确认的文件继续留在 Inbox；
+- 系统不建立 ConfirmationRecord；
+- 用户直接移动或修改文件就是明确的人类操作；
+- 不需要旧 HumanReview 等价证明；
+- 不需要 Git Commit 作为确认凭据。
+
+---
+
+## 9. 旧系统处置
+
+### 9.1 整理期间
+
+- 旧目录保持不动；
+- 不需要冻结旧系统；
+- 不需要 Snapshot、Shadow 或双写；
+- 整理脚本只读；
+- 任何生成错误都通过重新运行或手工修复解决。
+
+### 9.2 整理完成后
+
+满足以下条件后，用户可以直接删除旧系统：
+
+1. 所有审核条目都有决定；
+2. KEEP / MERGE / REWRITE 均生成候选；
+3. 用户确认需要的候选已经进入 `assets/`；
+4. 新系统索引成功；
+5. 关键搜索可以找到新 Asset。
+
+是否保留一个普通压缩包由用户决定，不属于产品设计。
+
+### 9.3 不做
+
+不做：
+
+- 旧系统恢复链修复；
+- 回滚包；
+- 切换开关；
+- Shadow；
+- Legacy Archive；
+- 旧新系统长期并存；
+- 迁移失败自动恢复。
+
+---
+
+## 10. 旧 Usage 和 Task
+
+全部不迁移。
+
+原因：
+
+- 旧 Usage 只是过去的统计；
+- 新系统只关心新 Asset 从启用后开始的 Recall、Read、Used；
+- 旧系统没有新 Task Loadout 所需的完整稳定数据；
+- 不从旧计数推导任务、事件或 Outcome。
+
+新系统 Usage 从 0 开始。
+
+---
+
+## 11. 校验
+
+### 11.1 盘点校验
+
+- 每个 allowlist 内源文件都进入 Inventory，并记录路径、SHA-256、类别、Workspace、读取状态和 disposition；
+- Exact Hash 去重组列全所有来源，不重复要求用户审核同一内容；
+- 每个源文件至少关联一个审核项，或具有明确的辅助/忽略 disposition；
+- 每个审核项反向列全 sourceRefs，双向覆盖一致；
+- 近重复、互补、冲突和可拆分内容有显式标记；
+- 文件读取失败必须列入错误区；
+- 不允许静默跳过。
+
+### 11.2 决策校验
+
+审核完成前：
+
+```text
+PENDING = 0
+```
+
+每个审核项必须且只能有一个最终决定，所有 MERGE group 必须闭合。
+
+### 11.3 生成校验
+
+- KEEP / MERGE / REWRITE 都有对应输出；
+- DROP 没有输出；
+- 所有 Asset ID 唯一；
+- Frontmatter 可被新系统解析；
+- Content Hash 可计算；
+- 路径与 Scope 一致；
+- WORKSPACE Asset 的 Workspace 存在；
+- 不包含旧核心 ID 字段。
+
+### 11.4 搜索校验
+
+至少验证：
+
+- 每个 Workspace 的关键新 Memory 可命中；
+- 项目专属 Document 可命中；
+- GLOBAL 内容可以跨 Workspace 命中；
+- 其他 Workspace 内容不会串入；
+- SKILL 类型即使没有数据，也不会导致索引异常。
+
+`asset_read` 必须读取当前 Markdown 文件；旧 FTS 正文不得作为完整 Asset 返回。任何候选在最终确认前都不进入默认 Search/Read。
+
+---
+
+## 12. 分阶段任务
+
+### M00：旧系统只读盘点
+
+目标：
+
+- 固定旧知识源目录 allowlist；
+- 全量扫描 Memory、Candidate 和 Document 源文件；
+- 生成 `v4-source-inventory.json`；
+- 不修改旧系统。
+
+完成条件：
+
+- 所有源文件可计数并有实际字节 SHA-256；
+- 失败文件有明确清单和读取状态；
+- 每个源文件都有来源类别、Workspace 和初始 disposition；
+- 不在本阶段直接为每个源文件分配审核编号。
+
+依赖：CodexMemoryOS Revision 2.1 的 Asset 文件契约已确定。可在新项目实现早期提前执行。
+
+### M01：去重、聚类并生成审核文档
+
+目标：
+
+- 对 Inventory 执行 Exact Hash 去重；
+- 按 Workspace + 主题聚类；
+- 标记重复、互补、冲突和可拆分内容；
+- 生成主审核索引和普通 Markdown 审核批次；
+- 对每个当前知识审核项提供 KEEP / MERGE / REWRITE / DROP 建议。
+
+完成条件：
+
+- Inventory 的每个源文件都有 disposition 和 reviewIds；
+- 每个审核项反向列全 sourceRefs；
+- Exact duplicate 不重复展示完整内容；
+- 近重复和冲突的差异可供用户判断；
+- 所有用户决定均为 PENDING；
+- 不生成新 Asset。
+
+依赖：M00。
+
+### M02：用户逐批 KEEP / MERGE / REWRITE / DROP
+
+目标：
+
+- 用户按审核批次逐项填写决定；
+- 每批使用独立 Codex 新会话完成；
+- Codex 只按用户指令更新决定和备注。
+
+完成条件：
+
+- PENDING 为 0；
+- 所有 MERGE 组闭合；
+- 所有 REWRITE 有明确要求；
+- 统计汇总更新。
+
+依赖：M01。
+
+### M03：生成 Inbox Asset
+
+目标：
+
+- 根据审核结果调用新系统 IdGenerator；
+- 生成 MEMORY / DOCUMENT / SKILL 候选；
+- 全部写入 `inbox/`；
+- 生成 `v4-generation-report.md`。
+
+完成条件：
+
+- 所有应生成条目都有输出；
+- Frontmatter、路径、Hash 校验通过；
+- 不写入 `assets/`；
+- 不迁移旧 Usage 和旧 ID。
+
+依赖：M02，以及新项目 N02 IdGenerator、N03 Asset Schema 和已冻结的 Inbox 写入规则。
+
+### M04：最终人工确认
+
+目标：
+
+- 用户检查每个生成结果；
+- 确认的文件进入 `assets/`；
+- 不认可的返回 Inbox 修改或删除；
+- 通过 Catalog、Search、Read 验收。
+
+完成条件：
+
+- 用户需要的内容全部进入正式 Asset；
+- 关键 Search/Read 验证通过；
+- 生成报告记录最终结果。
+
+依赖：M03，以及新项目 N04 Catalog、N05 Search/Read。
+
+### M05：移除旧系统
+
+目标：
+
+- 删除旧 Hook / MCP 注册；
+- 切换 Codex 到新 MCP；
+- 旧系统退出运行链路；
+- 旧源目录是否物理删除由用户另行明确决定；
+- 更新运行文档和最终完成记录。
+
+完成条件：
+
+- Codex 只调用新系统；
+- 新 Asset 正常搜索；
+- 旧系统不再参与运行；
+- 不要求保留恢复链。
+
+依赖：M04，并且新 HTTP MCP 已稳定。
+
+跨项目依赖总结：
+
+```text
+M00～M02：Asset 文件契约确定后可提前进行
+M03：依赖 IdGenerator、Asset Schema、Inbox 写入规则
+M04：依赖 Catalog、Search、Read
+M05：依赖新 MCP 已稳定
+```
+
+---
+
+## 13. 任务状态表
+
+| 任务 | 状态 | 完成内容 | 修改文件 | 测试结果 | 未解决问题 | 下一任务输入 | 简短总结 |
+|---|---|---|---|---|---|---|---|
+| M00 | NOT_STARTED | — | — | — | — | — | — |
+| M01 | NOT_STARTED | — | — | — | — | — | — |
+| M02 | NOT_STARTED | — | — | — | — | — | — |
+| M03 | NOT_STARTED | — | — | — | — | — | — |
+| M04 | NOT_STARTED | — | — | — | — | — | — |
+| M05 | NOT_STARTED | — | — | — | — | — | — |
+
+状态：
+
+```text
+NOT_STARTED
+IN_PROGRESS
+DONE
+BLOCKED
+```
+
+### 13.1 每个任务完成记录
+
+```markdown
+## <任务编号> 完成记录
+
+- 状态：DONE / BLOCKED
+- 完成内容：
+- 修改文件：
+- 测试命令与结果：
+- 未解决问题：
+- 下一任务输入：
+- 简短总结：
+```
+
+### 13.2 新对话启动模板
+
+```text
+请执行旧 Engineering Memory 人工整理任务 <任务编号>。
+
+依据：
+1. 本人工整理设计 Revision 2.1；
+2. 新项目设计 Revision 2.1；
+3. 旧系统当前只读文件；
+4. 上一任务完成记录。
+
+本轮只完成 <任务编号>。
+不得顺带执行下一任务。
+不得删除或修改旧系统源文件。
+Codex 只能给出整理建议，最终 KEEP / MERGE / REWRITE / DROP 由用户决定。
+完成后更新状态表和完成记录。
+不要执行 Git commit 或 push。
+```
+
+---
+
+## 14. 完成标准
+
+人工整理全部完成的标准：
+
+1. 旧知识盘点完整；
+2. 源文件先 Exact Hash 去重并按 Workspace + 主题聚类；
+3. 主审核索引和普通 Markdown 批次覆盖所有当前知识审核项；
+4. 每个审核项都有用户最终决定；
+5. KEEP / MERGE / REWRITE 都生成符合新系统契约的 Asset；
+6. 新 Asset 使用新的无下划线 `ast` Snowflake ID；
+7. 新 Asset 不携带旧核心 ID、旧状态、旧 Usage 或旧审计模型；
+8. 正式 Asset 全部由用户再次确认；
+9. SQLite 索引可以找到关键内容；
+10. Workspace 不串扰；
+11. 新 MCP 正常使用；
+12. 旧 Usage 不迁移；
+13. 旧系统退出，不保留产品级回滚机制。
+
+---
+
+## 15. 最终原则
+
+> 这不是把 V4 搬进一个新壳，而是把旧系统里现在仍然有用的内容重新整理成人真正认可的 Asset。Codex 负责把材料摆出来、指出重复和提出建议；用户逐条决定；新系统只接收最后需要的知识，旧系统的复杂历史到此结束。

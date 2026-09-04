@@ -1,0 +1,100 @@
+import { SnowflakeIdGenerator } from "@codex-memory-os/id-generator";
+import { z } from "zod";
+
+import {
+  assetIdSchema,
+  assetScopeSchema,
+  assetTypeSchema,
+  workspaceNameSchema,
+} from "../../asset/index.js";
+import { TASK_STATUSES } from "../../task/index.js";
+
+const idGenerator = new SnowflakeIdGenerator();
+
+const requiredQueryTextSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value.trim().length > 0, "must contain non-whitespace text");
+
+const limitParameterSchema = z
+  .string()
+  .regex(/^[1-9][0-9]*$/u, "limit must be a positive integer")
+  .transform(Number)
+  .pipe(z.number().int().safe().min(1).max(100));
+
+export const workspaceParameterSchema = z.union([
+  z.literal("null").transform(() => null),
+  workspaceNameSchema,
+]);
+
+export const assetListQuerySchema = z
+  .object({
+    limit: limitParameterSchema.optional(),
+    query: requiredQueryTextSchema.optional(),
+    scope: assetScopeSchema.optional(),
+    type: assetTypeSchema.optional(),
+    workspace: workspaceParameterSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.workspace === null && value.scope === "WORKSPACE") {
+      context.addIssue({
+        code: "custom",
+        message: "workspace=null cannot be combined with scope=WORKSPACE",
+        path: ["workspace", "scope"],
+        params: { code: "INVALID_FILTER_COMBINATION" },
+      });
+    }
+    if (typeof value.workspace === "string" && value.scope === "GLOBAL") {
+      context.addIssue({
+        code: "custom",
+        message: "a concrete workspace cannot be combined with scope=GLOBAL",
+        path: ["workspace", "scope"],
+        params: { code: "INVALID_FILTER_COMBINATION" },
+      });
+    }
+  });
+
+export const taskLoadoutListQuerySchema = z
+  .object({
+    limit: limitParameterSchema.optional(),
+    status: z.enum(TASK_STATUSES).optional(),
+    workspace: workspaceParameterSchema.optional(),
+  })
+  .strict();
+
+export const usageListQuerySchema = z
+  .object({
+    assetId: assetIdSchema.optional(),
+    limit: limitParameterSchema.optional(),
+    taskId: z.string().refine((id) => idGenerator.validate(id, "tsk"), "taskId must be a valid tsk-prefixed ID").optional(),
+    workspace: workspaceParameterSchema.optional(),
+  })
+  .strict();
+
+export const assetPathSchema = z.object({ assetId: assetIdSchema }).strict();
+export const taskPathSchema = z
+  .object({
+    taskId: z.string().refine((id) => idGenerator.validate(id, "tsk"), "taskId must be a valid tsk-prefixed ID"),
+  })
+  .strict();
+
+export type AssetListQuery = z.infer<typeof assetListQuerySchema>;
+export type TaskLoadoutListQuery = z.infer<typeof taskLoadoutListQuerySchema>;
+export type UsageListQuery = z.infer<typeof usageListQuerySchema>;
+
+export interface RestErrorDetail {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface RestErrorResponse {
+  error: RestErrorDetail;
+  ok: false;
+}
+
+export interface RestSuccessResponse<T> {
+  data: T;
+  ok: true;
+}

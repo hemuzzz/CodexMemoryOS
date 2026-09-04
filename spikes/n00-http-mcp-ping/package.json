@@ -1,0 +1,24 @@
+{
+  "name": "codex-memory-os-n00-http-mcp-ping",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22.16.0"
+  },
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "check": "tsx src/check.ts",
+    "test": "tsx --test test/http-mcp.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.29",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3"
+  }
+}

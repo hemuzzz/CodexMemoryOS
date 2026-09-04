@@ -1,0 +1,1768 @@
+# CodexMemoryOS 新项目设计方案（Revision 2.1）
+
+> 文档状态：实现基线
+> 文档版本：Revision 2.1
+> 技术路线：Node.js 22.16.0 + TypeScript + Vue 3 + SQLite  
+> 产品边界：个人、本地、Codex 专用、Human-First  
+> 替代文档：`engineering-memory-next-design.md`（Revision 1，不再作为实现基线）
+
+---
+
+## 0. 文档使用规则
+
+### 0.1 本文解决什么问题
+
+CodexMemoryOS 用于保存和管理个人当前仍然有用的知识，使 Codex 在新的任务中能够：
+
+1. 找到与当前 Workspace 和任务相关的知识；
+2. 按需读取完整 Markdown；
+3. 记录知识是否被 Recall、Read、Used；
+4. 查看当前任务装配了哪些知识；
+5. 由人决定什么内容可以成为正式知识。
+
+本文不尝试保存旧知识的完整演进史，也不尝试证明某条知识为什么一步步变成今天的样子。文件历史交给 Git，当前知识以 Asset Repository 中的现有 Markdown 为准。
+
+### 0.2 Human-First
+
+系统遵守以下规则：
+
+1. Codex 可以搜索、读取、整理、提出候选内容。
+2. Codex 不能绕过用户，把候选内容直接写入正式 Asset。
+3. 候选内容进入 `inbox/`，正式内容进入 `assets/`。
+4. 用户明确确认后，候选的确切文件才可以从 `inbox/` 进入 `assets/`。
+5. 用户直接使用 IDEA、VS Code 或其他编辑器修改正式 Asset，视为用户自己的新判断，修改后直接生效。
+6. 不建立额外的 Revision、Head、Publication、ConfirmationRecord 或审批账本。
+7. Git 负责普通历史、Diff 和恢复，不在应用层重复实现版本系统。
+
+### 0.3 分阶段执行协议
+
+整个项目按独立任务实施：
+
+- 每个任务使用一个新的 Codex 对话。
+- 一个对话只完成一个任务，不顺带实现下一任务。
+- 任务完成时必须更新本文的任务状态表。
+- 任务完成记录只包含：任务状态、完成内容、修改文件、测试结果、未解决问题、下一任务输入和简短总结。
+- 下一任务只依赖仓库当前实际内容，不要求 Codex 自动 Commit。
+- Git Commit 由用户决定，不是任务完成条件。
+
+---
+
+## 1. 项目定位
+
+### 1.1 一句话定位
+
+> CodexMemoryOS 是一个以 Markdown + Git 为知识原件、为个人 Codex 提供 Asset 搜索、上下文装配、使用记录和只读可视化的本地知识系统。
+
+### 1.2 核心目标
+
+1. 统一管理 `MEMORY`、`DOCUMENT`、`SKILL` 三类 Asset。
+2. 让项目专属文档和跨项目通用知识都可以进入统一 Asset Repository。
+3. 让 Codex 通过 MCP 搜索和读取 Asset。
+4. 让 Context 模块为每个任务形成 Task Loadout。
+5. 让 Usage 模块记录 `RECALL / READ / USED`。
+6. 让 Vue Hub 能查看 Asset、Markdown、Task Loadout、Usage 和系统状态。
+7. 让旧系统知识经过 Codex 整理、用户逐条确认后进入新系统。
+
+### 1.3 明确不做
+
+当前版本不做：
+
+- 团队、组织、用户体系、ACL 和多人协作；
+- 多 Agent、Agent Loadout 或 Agent 编排；
+- MemoryProxy、模型 API 转发或替换 Codex 会员链路；
+- Revision、Head、Publication、复杂确认记录；
+- V4 语义无损迁移、迁移账本、Shadow、回滚平台；
+- ConversationHistory 导入和历史对话重新提炼；
+- CodeGraph 管理；
+- 向量数据库和向量检索；
+- 知识图谱、复杂标签、Canvas、插件体系；
+- Hub 在线编辑和写操作；
+- Skill 安装、发布和与 `~/.codex/skills` 同步；
+- 代码 Commit 与 Asset Commit 配对；
+- 旧 Usage 迁移；
+- 自动判断知识是否正确或仍然适用。
+
+---
+
+## 2. 核心设计原则
+
+### 2.1 当前有用优先
+
+系统只关心“现在还有没有用”。旧系统中的版本、状态、关系、审核和审计记录，不自动成为新系统的数据模型。
+
+### 2.2 Markdown + Git 是正式知识来源
+
+- `assets/` 下的 Markdown 是正式 Asset。
+- `inbox/` 下的 Markdown 是候选 Asset。
+- SQLite 不保存 Asset 正文和 Asset 是否正式的真相。
+- Git 自然记录文件修改历史；系统不建立第二套版本系统。
+
+### 2.3 目录表达正式性
+
+```text
+inbox/
+  = 候选，默认不被 Codex 搜索
+
+assets/
+  = 正式知识，进入索引和默认搜索
+```
+
+正式性不使用数据库状态字段表达。
+
+### 2.4 SQLite 分成两类职责
+
+SQLite 可以保存：
+
+1. 可从 Markdown 重建的 Asset 索引；
+2. 丢失后不会导致知识丢失的 Task Loadout 和 Usage 运行数据。
+
+因此更准确的边界是：
+
+> SQLite 不拥有知识真相，但允许保存非关键运行数据。
+
+### 2.5 MCP 保留，代理取消
+
+- 不使用 MemoryProxy。
+- 不需要模型 API Key。
+- MCP 是 Codex 使用知识系统的标准入口。
+- 主方案采用 Streamable HTTP MCP。
+- 若 Codex 当前环境对 HTTP MCP 兼容性不足，增加一个薄 STDIO Adapter 转发到本地 Node 服务。
+- STDIO Adapter 不实现任何业务逻辑。
+
+### 2.6 少量装配，大量按需读取
+
+Task Loadout 不等于把所有相关知识全文塞给 Codex。
+
+默认策略：
+
+- 短 MEMORY 可以注入摘要；
+- DOCUMENT 和 SKILL 默认只作为按需读取项；
+- 完整 Markdown 通过 `asset_read` 获取；
+- 直接注入内容必须受字符数上限约束。
+
+---
+
+## 3. 总体架构
+
+```text
+                         Codex Desktop / CLI
+                    ┌──────────┼──────────┐
+                    │          │          │
+       Streamable HTTP MCP   STDIO MCP   UserPrompt Hook
+              （主）          （降级）        │
+                    │          │          │
+                    │     薄 STDIO Adapter │
+                    │          │          │
+                    └──────┬───┴──────────┘
+                           ▼
+                 Node.js 本地常驻服务 /mcp
+               ┌──────────────────────┼──────────────────────┐
+               ▼                      ▼                      ▼
+             Asset                  Context                 Usage
+      扫描 / Hash / Search     Task Loadout 生成       Recall/Read/Used
+               │                      │                      │
+               └──────────────────────┼──────────────────────┘
+                                      ▼
+                  Markdown Asset Repository + SQLite
+                                      ▲
+                                      │ REST（只读）
+                                   Vue 3 Hub
+```
+
+### 3.1 运行形态
+
+生产运行时只有一个核心 Node 服务：
+
+- 绑定 `127.0.0.1`；
+- 提供 `/mcp`；
+- 提供 `/api/*`；
+- 提供 Vue 构建后的静态文件；
+- 维护 Asset 文件监听；
+- 维护 SQLite 索引、Task Loadout 和 Usage。
+
+STDIO Adapter 仅在需要兼容时启用：
+
+```text
+Codex STDIO MCP
+    → Adapter
+    → http://127.0.0.1:<port>/mcp
+```
+
+Adapter 只在直接 HTTP MCP 经 N00 Spike 证明对目标客户端不稳定时实现，不得改连内部 REST。
+
+---
+
+## 4. 技术基线
+
+### 4.1 运行环境
+
+- Node.js：`22.16.0` 作为最低和推荐开发基线；
+- TypeScript：开启 `strict`；
+- 包管理：pnpm workspace；
+- 前端：Vue 3 + TypeScript + Vite；
+- 后端：Hono；
+- MCP：官方 TypeScript SDK；
+- 数据校验：Zod；
+- 数据库：SQLite + FTS5；
+- SQLite 驱动：MVP 使用 `better-sqlite3`，通过 Repository 接口隔离；N04 按 `12.11.1`、`13.0.3` 的固定候选顺序执行目标机器能力探针，只锁定首个全部通过的精确版本，当前版本与能力状态保持 UNKNOWN；
+- Markdown Frontmatter：`gray-matter`；
+- Markdown 展示：`markdown-it` 或等价轻量实现；
+- 文件监听：`chokidar`；
+- Git：优先调用本机 Git CLI，只读取状态，不在 MVP 自动 Commit。
+
+### 4.2 选型原则
+
+1. 不使用 NestJS，不为本地单用户工具引入企业级依赖注入体系。
+2. 不拆微服务。
+3. 不使用 Redis、MQ、Elasticsearch 或外部数据库。
+4. 不使用向量检索，先验证 SQLite FTS 是否足够。
+5. 不把 MCP SDK 类型传入 Asset、Context、Usage 领域模块。
+6. 第三方依赖的确切版本由锁文件固定，设计文档只冻结技术边界。
+
+N04 的 `better-sqlite3` 候选选择 Gate：当前候选安装、加载、进程稳定性或 SQLite 能力探针失败时，保存证据并继续测试下一个允许候选；首个全部通过的候选立即锁定并停止测试其他候选；只有全部允许候选均失败时，N04 才标记 `BLOCKED`。不得在运行时代码中自动切换驱动版本、维护多套 FTS Schema 或提供版本降级分支。
+
+---
+
+## 5. 源码结构
+
+```text
+codex-memory-os/
+├── apps/
+│   ├── server/
+│   │   └── src/
+│   │       ├── asset/
+│   │       ├── context/
+│   │       ├── usage/
+│   │       ├── mcp/
+│   │       ├── hook/
+│   │       ├── http/
+│   │       ├── infrastructure/
+│   │       └── main.ts
+│   │
+│   ├── hub/
+│   │   └── src/
+│   │       ├── pages/
+│   │       ├── components/
+│   │       ├── api/
+│   │       └── router/
+│   │
+│   └── stdio-adapter/
+│       └── src/
+│           └── main.ts
+│
+├── packages/
+│   ├── contracts/
+│   ├── id-generator/
+│   └── test-fixtures/
+│
+├── docs/
+│   ├── design/
+│   ├── progress/
+│   └── decisions/
+│
+├── package.json
+├── pnpm-workspace.yaml
+└── tsconfig.base.json
+```
+
+`packages/contracts` 只放前后端、REST、MCP 都需要的 Schema 和类型，不放业务实现。
+
+---
+
+## 6. 运行数据结构
+
+### 6.1 Asset Repository
+
+Asset Repository 是独立的个人 Git 仓库，不和应用源码仓库混合。
+
+```text
+asset-repository/
+├── assets/
+│   ├── global/
+│   │   ├── memories/
+│   │   ├── documents/
+│   │   └── skills/
+│   │
+│   └── workspaces/
+│       └── <workspace>/
+│           ├── memories/
+│           ├── documents/
+│           └── skills/
+│
+└── inbox/
+    ├── global/
+    │   ├── memories/
+    │   ├── documents/
+    │   └── skills/
+    │
+    └── workspaces/
+        └── <workspace>/
+            ├── memories/
+            ├── documents/
+            └── skills/
+```
+
+说明：
+
+- 项目专属文档直接进入对应 Workspace 的 `documents/`；
+- 跨项目内容进入 `global/`；
+- Obsidian 不再参与任何架构或运行流程；
+- 用户可以直接用 IDEA、VS Code 或其他 Markdown 编辑器打开整个仓库。
+
+### 6.2 应用数据
+
+```text
+~/.codex-memory-os/
+├── config/
+│   ├── application.json
+│   └── workspaces.json
+├── data/
+│   └── codex-memory.sqlite
+├── logs/
+└── runtime/
+```
+
+---
+
+## 7. 统一 ID 方案
+
+### 7.1 格式
+
+所有新系统内部业务 ID 使用“固定三位业务前缀 + Snowflake 十进制字符串”，前缀与数字之间不使用下划线：
+
+```text
+ast2034512345678901248
+tsk2034512345678901249
+usg2034512345678901250
+```
+
+固定三位前缀：
+
+| 前缀 | 对象 |
+|---|---|
+| `ast` | Asset |
+| `tsk` | Task |
+| `usg` | Task Asset Usage |
+
+当前不把 Workspace 建模成必须拥有 ID 的实体，Workspace 使用可读字符串。
+
+统一校验表达式：
+
+```text
+^(ast|tsk|usg)[0-9]+$
+```
+
+### 7.2 Snowflake 边界
+
+Snowflake 本身包含时间信息，因此：
+
+- 不额外把日期再次拼入 ID；
+- 不要求业务模块解析 ID 中的时间；
+- `created_at` 仍单独保存，便于阅读和查询。
+
+设计只冻结以下边界：
+
+- 使用成熟、维护正常、兼容 Node.js 22 的开源 Snowflake 实现；
+- 由统一 `IdGenerator` 包装第三方实现；
+- 只由单机 Node 服务生成；
+- 输出必须是带业务前缀的字符串；
+- 时钟回退不得产生重复 ID；
+- 并发生成必须通过唯一性测试；
+- `bigint` 不得直接进入 `JSON.stringify`。
+
+本设计不冻结具体 npm 库、位布局、自定义 worker 注册、分布式锁、ID 中心或自定义 Snowflake 协议；具体库在 N02 实现时选择并验证。
+
+N02 当前实现选择 `snowflake.io@4.1.2`，由统一 `SnowflakeIdGenerator` 包装，固定单机节点 `id=0`，时钟回退策略为 `throw`：进程内检测到当前时间早于最后生成时间时明确拒绝生成，不同步等待、不静默生成重复 ID。该选择由锁文件固定，属于当前实现而不是对第三方位布局的设计冻结；后续替换实现必须继续满足 `IdGenerator` 接口和 N02 测试契约。
+
+### 7.3 通用工具
+
+```ts
+export type IdPrefix = 'ast' | 'tsk' | 'usg';
+
+export interface IdGenerator {
+  next(prefix: IdPrefix): string;
+  validate(id: string, expectedPrefix?: IdPrefix): boolean;
+}
+```
+
+约束：
+
+1. Asset、Task、Usage 等已有业务实体 ID 必须通过该工具生成；
+2. 禁止业务代码手工拼接；
+3. 前缀在公共常量或类型中集中定义；
+4. Snowflake 数值在生成器内部可以使用 `bigint`；
+5. `bigint` 必须在 JSON 序列化前转换为字符串；
+6. JSON、HTTP、Markdown、Vue 和 SQLite 中统一使用字符串；
+7. SQLite 字段类型统一为 `TEXT`；
+8. 单个 Node 主服务负责生成 ID；
+9. STDIO Adapter 不生成 ID；
+10. 系统时钟回退不得静默产生重复 ID；
+11. 关联表如果已有自然主键，不为满足统一 ID 规则而人为增加业务 ID。
+
+---
+
+## 8. Asset 模型
+
+### 8.1 Asset 类型
+
+```ts
+export type AssetType = 'MEMORY' | 'DOCUMENT' | 'SKILL';
+export type AssetScope = 'GLOBAL' | 'WORKSPACE';
+```
+
+定义：
+
+- `MEMORY`：短小、明确、可直接复用的规则、决定、经验或约束；
+- `DOCUMENT`：需要完整阅读的方案、架构、分析、说明或复盘；
+- `SKILL`：可重复执行的一套方法。当前只作为普通可检索类型，不实现安装和执行。
+
+即使第一版没有 SKILL 数据，也必须保留 `SKILL` 枚举、目录规划、Scanner 识别、Hub 筛选以及普通 Search/Read；本期不实现 Skill 安装、发布、发现、执行、`~/.codex/skills` 同步、漂移检查或旧 Skill 迁移。
+
+### 8.2 Markdown Frontmatter
+
+```yaml
+---
+id: ast2034512345678901248
+type: MEMORY
+scope: WORKSPACE
+workspace: xm-ai-job
+title: 充值回调幂等规则
+summary: 充值回调必须避免重复通知导致重复入账
+---
+```
+
+正文：
+
+```markdown
+# 充值回调幂等规则
+
+具体内容……
+```
+
+字段规则：
+
+| 字段 | 必填 | 规则 |
+|---|---:|---|
+| `id` | 是 | `ast` 前缀 Snowflake ID，匹配 `^ast[0-9]+$` |
+| `type` | 是 | MEMORY / DOCUMENT / SKILL |
+| `scope` | 是 | GLOBAL / WORKSPACE |
+| `workspace` | 条件必填 | scope=WORKSPACE 时必须存在于 Workspace 配置；scope=GLOBAL 时不得填写 |
+| `title` | 是 | 人可读标题 |
+| `summary` | 是 | 用于搜索结果和 Loadout 的简短摘要 |
+
+当前不增加：
+
+```text
+status
+version
+revision
+head
+priority
+owner
+visibility
+legacy_id
+relation
+confirmation_id
+```
+
+### 8.3 文件命名
+
+建议：
+
+```text
+<asset-id>-<readable-slug>.md
+```
+
+例如：
+
+```text
+ast2034512345678901248-recharge-callback-idempotency.md
+```
+
+Asset 身份只由 Frontmatter 的 `id` 决定，文件路径和文件名可以调整。
+
+### 8.4 Content Hash
+
+#### 单文件 Asset
+
+```text
+content_hash = SHA-256(当前 Markdown 文件实际字节)
+```
+
+不做换行、Unicode、YAML 字段顺序或语义规范化。
+
+第一版只支持“一个 Asset = 一个普通 Markdown 文件”。目录型 Asset、非 Markdown 文件和 Symlink 均拒绝索引；目录型 Asset 及其 Hash 契约整体延后，本设计不预定义算法。
+
+Content Hash 的用途仅限：
+
+- 判断文件是否变化；
+- 校验 `inbox` 到 `assets` 的复制结果；
+- Hub 展示和排错。
+
+它不是版本号，也不是确认账本。
+
+### 8.5 Human-First 写入边界
+
+MVP 写入原则：
+
+- Asset Scanner 只索引 `assets/`；
+- `inbox/` 默认不进入 Codex 搜索；
+- Codex 生成的新知识只能写入 `inbox/`；
+- 用户明确确认后，系统才可把确切文件移动到 `assets/`；
+- 移动前后校验 SHA-256；
+- 用户直接修改 `assets/` 中的文件时，文件监听器重新索引；
+- Hub 当前只读，不提供确认或编辑按钮。
+
+---
+
+## 9. Workspace
+
+### 9.1 定义
+
+Workspace 是知识适用范围和检索隔离边界，通常对应一个项目或长期工作空间。
+
+示例：
+
+```text
+xm-ai-job
+codex-memory-os
+```
+
+GLOBAL 是 Asset Scope，不是伪 Workspace；不得创建名为 `global` 的 Workspace 来表示无法识别的 cwd。
+
+### 9.2 配置
+
+`workspaces.json`：
+
+```json
+{
+  "schemaVersion": 1,
+  "workspaces": [
+    {
+      "name": "xm-ai-job",
+      "paths": [
+        "/Users/hemu/Desktop/workSpace/xm-ai-job"
+      ]
+    },
+    {
+      "name": "codex-memory-os",
+      "paths": [
+        "/Users/hemu/Desktop/github/CodexMemoryOS"
+      ]
+    }
+  ]
+}
+```
+
+规则：
+
+1. Workspace 只能由 Codex Hook 根据当前 `cwd` 产生；
+2. Hook 对 `workspaces.json` 执行最长路径匹配，得到可信 Workspace；
+3. Hook 将可信 Workspace 写入 Task，MCP 再根据 `taskId` 读取该值；
+4. 无法匹配时 `Task.workspace` 写入 NULL，只允许访问 GLOBAL Asset；
+5. MCP 调用方不得通过参数选择或覆盖任意 Workspace；
+6. 不允许自动扩大到其他 Workspace；
+7. Workspace 名称是配置标识，不使用 Snowflake ID；
+8. 重命名 Workspace 属于显式维护操作。
+
+路径、Frontmatter、Scope 和 Workspace 配置必须满足同一资格规则：
+
+```text
+scope = GLOBAL
+→ Frontmatter 不填写 workspace
+→ 文件位于 assets/global/<type>/
+
+scope = WORKSPACE
+→ Frontmatter workspace 必须存在于 Workspace 配置
+→ 文件位于 assets/workspaces/<workspace>/<type>/
+```
+
+Inbox 使用相同的相对路径与 Frontmatter 规则，只把根目录替换为 `inbox/`。
+
+发现未知 Workspace、路径与 Frontmatter 不一致、重复 Asset ID、未知 Asset 类型、Frontmatter 无效、非普通单 Markdown 文件或 Symlink 时：文件继续保留，但该 Asset 不进入 Catalog、FTS 和 MCP Search/Read，并在 System Status 中展示错误。不得选择路径或 Frontmatter 其中之一继续索引。
+
+---
+
+## 10. SQLite 模型
+
+### 10.1 Asset 索引
+
+```sql
+CREATE TABLE asset_catalog (
+    asset_id        TEXT PRIMARY KEY,
+    asset_type      TEXT NOT NULL,
+    asset_scope     TEXT NOT NULL,
+    workspace       TEXT,
+    title           TEXT NOT NULL,
+    summary         TEXT NOT NULL,
+    file_path       TEXT NOT NULL UNIQUE,
+    content_hash    TEXT NOT NULL,
+    file_size       INTEGER NOT NULL,
+    modified_at     TEXT NOT NULL,
+    indexed_at      TEXT NOT NULL
+);
+```
+
+FTS：
+
+```sql
+CREATE VIRTUAL TABLE asset_fts USING fts5(
+    title,
+    summary,
+    body,
+    content = '',
+    contentless_delete = 1,
+    tokenize = 'trigram'
+);
+```
+
+`asset_fts` 使用 contentless-delete FTS，只保存检索所需的派生 token index，不保存可取回的 Asset 正文；其 `rowid` 与 `asset_catalog` 当前派生行关联。搜索命中后，摘要片段和完整内容都从当前 Markdown 读取并计算。SQLite/FTS 删除重建时可以重新分配该内部 rowid，它不是业务 ID。
+
+N04 必须在 Node.js 22.16.0 和目标 macOS ARM 机器上实际验证 SQLite `>= 3.43.0`、FTS5、trigram、`contentless_delete=1`、普通 `DELETE`、重新插入和事务回滚；`sqlite_compileoption_used()` 只记录，不作为成功判据。传统 contentless 特殊 delete command 不进入正式实现。
+
+索引规则：
+
+- 只扫描 `assets/`；
+- `inbox/` 由单独查询接口读取，不进入默认 FTS；
+- 重复 Asset ID 视为错误，所有冲突文件都不进入 Catalog/FTS；
+- Frontmatter 解析失败、重复 ID、Workspace 不存在、Scope/路径/Workspace 不一致、未知类型、非普通单 Markdown 文件或 Symlink 时，对应 Asset 立即失去检索资格；
+- 无效 Asset 的旧 Catalog/FTS 记录必须在同次更新中删除，Search 不得继续返回旧内容；
+- 单个 Asset 无效时记录诊断，其他有效 Asset 继续索引；
+- Asset Markdown 或 `workspaces.json` 变化后，防抖执行完整 N03 Scanner 形成完整 Scan Snapshot；资格判断全量，SQLite 只写入真正变化的差异；
+- 完整 Snapshot 有效时，在一个事务中先删除 `removed / invalidated / changed` 的旧 FTS rowid 和旧 Catalog 行，再写入 `changed / added` 的新 Catalog 与 FTS；`unchanged` 不写入；
+- Asset Repository 根目录或 `workspaces.json` 整体不可读、Scanner 异常退出或无法确认快照完整性时，不应用不完整结果、不批量删除旧 Catalog/FTS，并把 `indexState` 标记为 `DEGRADED` 或 `REBUILD_REQUIRED`；
+- 不维护短词内存缓存或第三份当前 Asset 状态；
+- SQLite 删除后可以完整重建 `asset_catalog` 和 `asset_fts`。
+
+### 10.2 Task Loadout
+
+```sql
+CREATE TABLE task_loadout (
+    task_id       TEXT PRIMARY KEY,
+    workspace     TEXT,
+    request       TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    loadout_json  TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+```
+
+状态：
+
+```text
+RUNNING
+COMPLETED
+CANCELLED
+```
+
+`task_id` 表示用户正在完成的逻辑任务，不等于一次 Codex Turn。`request` 保存创建该逻辑任务时的初始描述；`workspace` 是 Hook 确定的可信 Workspace，无法识别时为 NULL；`created_at`、`updated_at` 是普通时间字段。Task 主表不保存 `source_session_id`、`source_turn_id`，也不对它们建立唯一约束。
+
+Task 与 Codex 运行上下文使用简单关联表：
+
+```sql
+CREATE TABLE task_turn_binding (
+    task_id           TEXT NOT NULL,
+    source_session_id TEXT NOT NULL,
+    source_turn_id    TEXT NOT NULL,
+    bound_at           TEXT NOT NULL,
+
+    PRIMARY KEY (source_session_id, source_turn_id),
+
+    FOREIGN KEY (task_id)
+        REFERENCES task_loadout(task_id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX idx_task_turn_binding_task_id
+    ON task_turn_binding(task_id);
+```
+
+语义：
+
+- 一个 Task 可以绑定多个 Session 和 Turn；
+- 一个 Session 可以产生多个 Turn；
+- 一个 Task 可以跨多个 Session；
+- 一个具体 Turn 最多绑定一个 Task；
+- Session ID 和 Turn ID 只是不可解释的运行关联键，不保存对话正文，也不属于 ConversationHistory；
+- `task_turn_binding` 使用自然复合主键，不需要独立业务 ID。
+
+### 10.3 Usage
+
+```sql
+CREATE TABLE task_asset_usage (
+    usage_id      TEXT PRIMARY KEY,
+    task_id       TEXT NOT NULL,
+    asset_id      TEXT NOT NULL,
+
+    recall_count  INTEGER NOT NULL DEFAULT 0,
+    read_count    INTEGER NOT NULL DEFAULT 0,
+    used_flag     INTEGER NOT NULL DEFAULT 0,
+
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+
+    UNIQUE(task_id, asset_id),
+
+    FOREIGN KEY (task_id)
+        REFERENCES task_loadout(task_id)
+        ON DELETE CASCADE
+);
+```
+
+不对 `asset_catalog` 建外键，因为 Catalog 可以被删除重建。Asset 被删除后，历史 Usage 允许保留并显示为“Asset missing”。
+
+`usage_id` 使用 `usg` 前缀的统一 IdGenerator 生成，为 API、Hub、日志和问题定位提供稳定实体身份；`UNIQUE(task_id, asset_id)` 保证同一 Task 和 Asset 只有一条 Usage。`usage_id` 不写入 `loadout_json`，查询 Loadout 时由服务按 `task_id + asset_id` 关联，并在返回 DTO 中展示。
+
+### 10.4 真相边界
+
+| 数据 | 正式来源 | SQLite 丢失后的结果 |
+|---|---|---|
+| Asset 正文 | Markdown | 不丢失 |
+| Asset 是否正式 | assets / inbox 目录 | 不丢失 |
+| Asset 索引 | SQLite 派生 | 可重建 |
+| Task Loadout | SQLite | 历史丢失，可接受 |
+| Usage | SQLite | 统计丢失，可接受 |
+
+---
+
+## 11. Asset 搜索
+
+### 11.1 内部 Application Search 输入
+
+```ts
+interface AssetSearchContext {
+  workspace: string | null;
+}
+
+interface AssetSearchQuery {
+  context: AssetSearchContext;
+  query: string;
+  limit?: number;
+}
+```
+
+N05 只实现纯 Application Search/Read，不依赖 N06 才创建的 Task。`AssetSearchContext` 必须由服务端可信边界构造；N05 的 fixture 和 Golden Query 可以直接构造可信 Context。`workspace = null` 时只允许 GLOBAL；非空时只允许 GLOBAL 与该 Workspace。
+
+`limit` 省略时默认为 `20`；显式传入时必须是正的安全整数。Application Search 在完成当前 Markdown 资格复核和稳定排序后再截取结果，不允许因候选文件失效而提前丢失后续有效结果。
+
+N06/N07 完成后，外部 MCP Search 仍只接收 `taskId`、`query`、`limit`，由服务端根据 `taskId` 查询 `Task.workspace`，构造内部 `AssetSearchContext` 后调用 N05。外部调用方不得直接传入 Workspace、覆盖 `Task.workspace`、传入任意文件路径或绕过 Task 访问其他 Workspace。
+
+### 11.2 过滤
+
+默认候选集合：
+
+```text
+scope = GLOBAL
+OR
+(scope = WORKSPACE AND workspace = 当前 Workspace)
+```
+
+其中“当前 Workspace”只能来自内部可信 `AssetSearchContext`。`context.workspace` 为 NULL 时，候选集合只有 GLOBAL Asset。
+
+Search、Read、Mark Used 共用同一个 Asset 资格判断：
+
+```text
+asset.scope = GLOBAL
+OR
+(context.workspace IS NOT NULL
+ AND asset.scope = WORKSPACE
+ AND asset.workspace = context.workspace)
+```
+
+N07/N08 在外部 Task 调用链中从 `Task.workspace` 构造相同 Context，使 Search、Read、Mark Used 复用同一资格规则。Asset 不可检索或资格判断失败时返回明确错误；不得返回其他 Workspace，也不得直接按调用方给出的文件路径读取。
+
+### 11.3 查询语义与路由
+
+用户输入是普通字面查询，不是原始 FTS5 `MATCH` 语法。查询先执行 `trim`，按 Unicode 空白拆分并删除空项；每个搜索项使用 Unicode code point 计数，英文字母大小写折叠，不翻译、不分词、不做同义词扩展。多项默认使用 AND。
+
+```text
+全部搜索项长度 >= 3
+→ FTS：所有长词经唯一字面转义函数后执行 trigram FTS
+
+全部搜索项长度 < 3
+→ LITERAL：从 Catalog 取得当前 Context 合格 Asset，读取当前 Markdown 后匹配 title / summary / body
+
+同时存在长词和短词
+→ HYBRID：长词先用 FTS 缩小候选，再读取候选当前 Markdown 过滤短词
+```
+
+LITERAL 和 HYBRID 不建立内存正文缓存。读取 Markdown 时复用 N03 的解析与资格语义，当前文件已删除、损坏或资格变化时跳过该结果并记录索引陈旧诊断。当前不引入中文分词、bigram tokenizer、向量检索或 LLM 重排。
+
+### 11.4 排序
+
+MVP 排序信号：
+
+1. title 命中；
+2. summary 命中；
+3. body 命中；
+4. 当前 Workspace 优先于 GLOBAL；
+5. FTS5 BM25 分数。
+
+N05 冻结的确定性排序与 `score` 含义：FTS/HYBRID 的字段等级为 title=`3`、summary=`2`、body=`1`；LITERAL 使用专项方案中的 `6～1` 固定等级；同字段等级下当前 Workspace 优先于 GLOBAL，再按 FTS5 BM25 升序，最后按 Asset ID 升序。公共 `score = 字段等级 × 100 + 当前 Workspace 奖励 10 + 归一化 BM25`，分数越高越优，仅用于同一次查询结果的相对比较；真实排序始终使用完整排序元组，Asset ID 不编码进 `score`。
+
+不做：
+
+- 向量检索；
+- LLM 重排；
+- 自动场景分类；
+- 人工 Profile；
+- 多路 RRF。
+
+### 11.5 返回
+
+```ts
+interface AssetSearchItem {
+  assetId: string;
+  type: AssetType;
+  scope: AssetScope;
+  workspace?: string;
+  title: string;
+  summary: string;
+  matchedSnippet: string;
+  score: number;
+  searchStrategy: 'FTS' | 'LITERAL' | 'HYBRID';
+  contentHash: string;
+}
+```
+
+`matchedSnippet` 从当前已验证 Markdown 计算，不从 contentless-delete FTS 列读取正文副本。第一版不增加 `matchedFields`、`ftsRank`、`literalRank` 或多套内部排序分数；`score` 的统一含义由 N05 冻结。
+
+内部 Read 返回当前文件的严格 Frontmatter、完整 Markdown 实际内容和当前字节 `contentHash`：
+
+```ts
+interface AssetReadResult {
+  frontmatter: AssetFrontmatter;
+  markdown: string;
+  contentHash: string;
+}
+```
+
+Search/Read 只从 Catalog 取得路径，不接收调用方文件路径；随后只校验当前 Context 可访问的候选文件，并复用 N03 的 Frontmatter、路径、Workspace、文件类型、Symlink 和 Hash 规则。当前文件失效时跳过或返回统一不可访问错误，记录陈旧索引诊断并触发一次完整索引刷新；不保留跨请求正文缓存。
+
+搜索成功返回 Asset 时，Usage 模块记录 `RECALL`。
+
+---
+
+## 12. Context 与 Task Loadout
+
+### 12.1 职责
+
+Context 模块负责：
+
+1. 接收 Hook 已解析的可信 Workspace 并记录当前逻辑 Task；
+2. 根据 Task 和请求搜索 Asset；
+3. 选择少量直接注入项和按需读取项；
+4. 把结果保存到 `task_loadout.loadout_json`；
+5. 向 Hook 或 MCP 返回本次 Task Loadout。
+
+Context 不负责判断 Asset 是否正确，也不直接创建或更新 Usage；Usage 写入只属于 Usage 模块。
+
+### 12.2 固定字段与 JSON 扩展字段
+
+Task 主表保留字段：
+
+```text
+task_id
+workspace
+request
+status
+loadout_json
+created_at
+updated_at
+```
+
+容易变化的装配结构放入 `loadout_json`。
+
+### 12.3 `loadout_json`
+
+```json
+{
+  "schemaVersion": 1,
+  "limits": {
+    "maxInjectedCharacters": 3000,
+    "maxAssets": 8
+  },
+  "assets": [
+    {
+      "assetId": "ast2034512345678901248",
+      "mode": "DIRECT",
+      "reason": "当前任务需要直接知道该规则",
+      "estimatedCharacters": 420
+    },
+    {
+      "assetId": "ast2034512345678901251",
+      "mode": "ON_DEMAND",
+      "reason": "完整设计文档仅在需要时读取",
+      "estimatedCharacters": 0
+    }
+  ]
+}
+```
+
+说明：
+
+- `loadout_json` 不复制 Asset 正文；
+- JSON 必须带 `schemaVersion`；
+- 只保留 `schemaVersion`、`limits`、`assets` 以及每个 Asset 的 `assetId`、`mode`、`reason`、`estimatedCharacters`；
+- 数组位置就是装配顺序，不保存重复的顺序字段；
+- 不保存 Usage ID、Usage 计数、Asset 正文、title/summary 副本或派生计数；
+- Loadout 由服务端整体覆盖，不设计 JSON Patch、版本号、CAS 或子表；
+- 只有 RUNNING Task 可以更新 `loadout_json`，进入 COMPLETED 或 CANCELLED 后不再修改。
+
+### 12.4 默认装配规则
+
+MVP 先采用简单规则：
+
+1. 对 `Task.workspace + request` 执行 Asset Search；
+2. 最多选择 8 个 Asset；
+3. `MEMORY` 的高分结果可以使用 `DIRECT`；
+4. `DOCUMENT`、`SKILL` 默认使用 `ON_DEMAND`；
+5. 注入摘要总字符数默认不超过 3000；
+6. 低于阈值的结果不进入 Loadout；
+7. 无结果时返回空 Loadout，不跨 Workspace 扩大搜索；
+8. 不做 Scenario Profile。
+
+这些默认值是 MVP 参数，不是永久产品真理，应通过真实任务和消融实验调整。
+
+---
+
+## 13. Usage
+
+### 13.1 三种状态
+
+系统只记录：
+
+```text
+RECALL
+READ
+USED
+```
+
+含义：
+
+- `RECALL`：Asset 被 `asset_search` 实际返回；
+- `READ`：`asset_read` 成功返回完整内容；
+- `USED`：Codex 明确调用 `asset_mark_used`，表示该 Asset 实际参与当前任务。
+
+### 13.2 记录规则
+
+- Usage 模块独占 Usage upsert 和计数写入；
+- `asset_search` 每次对实际返回的每个 Asset 执行 `recall_count + 1`；
+- `asset_read` 从当前 Markdown 文件成功返回完整内容后执行 `read_count + 1`，不能用 FTS 中的旧正文代替；
+- `asset_mark_used` 显式把 `used_flag` 置为 1，重复调用仍保持为 1；
+- Read 不自动等于 Used；
+- Usage 不影响 Asset 是否正式；
+- Usage 不触发自动删除、自动晋升或自动修改；
+- 一个 `task_id + asset_id` 只有一条 Usage 记录；
+- Usage 行拥有独立 `usage_id`；
+- Loadout JSON 不保存 Usage 数据，查询 DTO 通过 `task_id + asset_id` 关联 Usage。
+
+---
+
+## 14. MCP 与 Hook
+
+### 14.1 主 MCP
+
+主入口：
+
+```text
+http://127.0.0.1:<port>/mcp
+```
+
+首批工具：
+
+```text
+asset_search
+asset_read
+asset_mark_used
+task_loadout_get
+task_loadout_list
+```
+
+#### `asset_search`
+
+- 输入：taskId、query、limit；
+- 输出：Asset 摘要列表；
+- 从 Task 获取可信 Workspace，构造 N05 的内部 `AssetSearchContext` 后执行统一资格判断；
+- 对实际返回的 Asset 自动记录 Recall。
+
+#### `asset_read`
+
+- 输入：taskId、assetId；
+- 输出：Frontmatter、完整 Markdown、contentHash；
+- 执行与 Search 相同的 Workspace 资格判断；
+- 从当前文件读取，重新校验当前文件资格和 Hash 后自动记录 Read；不得使用 FTS 中的正文替代当前完整 Markdown。
+
+#### `asset_mark_used`
+
+- 输入：taskId、assetId；
+- 输出：更新后的 Usage；
+- 执行与 Search 相同的 Workspace 资格判断；
+- 显式、幂等地把 Used 置为 1。
+
+#### `task_loadout_get`
+
+- 输入：taskId；
+- 输出：固定字段、结构化 loadout_json，并按 `taskId + assetId` 关联 Usage 后展示 usageId 与计数。
+
+#### `task_loadout_list`
+
+- 输入：workspace、status、limit；
+- 输出：任务摘要列表。
+
+### 14.2 HTTP MCP Ping Spike
+
+正式业务实现前必须先独立完成 N00。Spike 只实现一个 `ping` Tool，不实现 Asset、SQLite、Task、Loadout、Usage 或 Hub。
+
+至少验证：
+
+1. 当前 Codex CLI；
+2. 当前 Codex Desktop；
+3. `initialize`；
+4. `tools/list`；
+5. `tools/call`；
+6. 服务先启动；
+7. Codex 先启动、服务后启动；
+8. Node 服务停止后重启；
+9. 同一会话是否恢复；
+10. 多窗口并发；
+11. `required=false` 时服务缺失不阻断普通 Codex 任务；
+12. 固定 localhost 地址；
+13. Host / Origin 校验；
+14. 端口占用行为。
+
+只有直接 HTTP MCP 在目标客户端不稳定时，才进入薄 STDIO Adapter 降级验证。
+
+### 14.3 Hook
+
+UserPrompt Hook 只做轻量工作：
+
+1. 读取 Hook 提供的 `cwd`、`source_session_id` 和 `source_turn_id`；
+2. 通过 cwd 最长路径匹配确定可信 Workspace；
+3. 获取当前用户请求以及明确携带的现有 taskId；
+4. 按 Task 解析规则创建、复用或绑定逻辑 Task；
+5. 调用本地 Context 接口生成或读取 Task Loadout；
+6. 向 Codex 注入：
+   - taskId；
+   - workspace；
+   - 少量 `DIRECT` 内容；
+   - 说明可通过 MCP 读取其他 Asset。
+
+Hook 不直接扫描文件、不写 SQLite、不实现搜索算法。
+
+Task 解析顺序固定为：
+
+1. 当前 Session + Turn 已有 binding：直接返回已有 Task，保证 Hook 重试幂等；
+2. 用户或当前上下文明确指定现有 taskId：校验 Task 存在、状态为 RUNNING、Workspace 一致，再绑定当前 Session + Turn；
+3. 当前 Session 已经关联一个 RUNNING Task，且 Workspace 相同：默认复用该 Task 并绑定当前 Turn；
+4. 以上均不成立：创建新 Task 并绑定当前 Session + Turn。
+
+跨 Session 继续同一个逻辑任务时必须显式携带 taskId，可以来自新对话提示词、后续最小 task attach 操作或 Hub 复制的 Task ID。系统不自动猜测新会话是否属于旧任务。
+
+Codex 的 Turn 和 Session 结束不自动推导 Task 状态：
+
+- Stop：只表示当前 Turn 结束；
+- Interrupt：只表示当前 Turn 被打断；
+- SessionEnd：只表示 Session 结束。
+
+Task 状态只能通过最小的显式任务状态更新能力发生：
+
+```text
+RUNNING → COMPLETED
+RUNNING → CANCELLED
+```
+
+不增加 FAILED、RETRYING、PAUSED、ARCHIVED、Task Event、Task Outcome 或 ConversationHistory。
+
+### 14.4 STDIO 降级适配器
+
+仅在 HTTP MCP 实测不稳定时启用。
+
+约束：
+
+- 只做协议桥接；
+- 不拥有数据库连接；
+- 不生成 ID；
+- 不维护缓存；
+- 不复制业务规则；
+- 只桥接 STDIO MCP 与同一个 HTTP `/mcp`；
+- 不连接内部 REST；
+- Node 主服务未启动时返回明确错误。
+
+---
+
+## 15. Vue Hub MVP
+
+Hub 本期只读。
+
+### 15.1 Asset Library
+
+展示：
+
+- Asset ID；
+- 标题；
+- 类型；
+- Scope；
+- Workspace；
+- Summary；
+- 文件路径；
+- 最后修改时间；
+- Content Hash。
+
+支持：
+
+- 关键词搜索；
+- Workspace 筛选；
+- MEMORY / DOCUMENT / SKILL 筛选；
+- GLOBAL / WORKSPACE 筛选；
+- 显示命中片段和匹配信息；
+- 正式 Asset 与 Inbox 候选切换查看。
+
+### 15.2 Asset Detail
+
+展示：
+
+- 渲染后的 Markdown；
+- 原始 Markdown；
+- Frontmatter；
+- 文件路径；
+- Content Hash；
+- 当前 Workspace；
+- Recall / Read / Used 汇总；
+- 最近出现过的 Task Loadout。
+
+不提供编辑、移动、删除和确认按钮。
+
+### 15.3 Task Loadout
+
+列表展示：
+
+- Task ID；
+- Workspace；
+- Request 摘要；
+- Status；
+- 创建和更新时间。
+
+详情展示：
+
+- 完整 Request；
+- 结构化的 `loadout_json`；
+- 原始 JSON；
+- 按数组位置展示 Asset 装配顺序；
+- 每个 Asset 的 DIRECT / ON_DEMAND、reason、estimatedCharacters；
+- 服务按 Task ID + Asset ID 关联出的 usageId、Recall / Read / Used；
+
+### 15.4 Usage
+
+只做查询：
+
+- 按 Task；
+- 按 Asset；
+- 按 Workspace。
+
+展示：
+
+```text
+usageId
+taskId
+assetId
+recallCount
+readCount
+usedFlag
+createdAt
+updatedAt
+```
+
+不做趋势图、评分、排行榜和自动优化建议。
+
+### 15.5 System Status
+
+System Status 是当前进程、Scanner 诊断、SQLite 计数和配置校验组成的计算型 DTO，不建立状态表。
+
+展示：
+
+- service version；
+- uptime；
+- readiness；
+- MCP endpoint readiness；
+- Asset Repository 路径；
+- 正式 Asset 数量；
+- Inbox 数量；
+- Catalog 数量；
+- FTS 数量；
+- 最后一次成功扫描时间；
+- watcher 状态；
+- indexState；
+- rebuildRequired；
+- 解析失败文件；
+- 重复 Asset ID；
+- Workspace 配置错误；
+- 路径与 Frontmatter 冲突；
+- 未知 Asset 类型。
+
+`MCP endpoint readiness` 只表示本地 `/mcp` 端点就绪，不声称 Codex 客户端已经连接。Hub 不为 STDIO Adapter 增加心跳或运行状态表。
+
+Hub 不提供 Markdown 编辑、候选确认、文件移动、Git 操作、标签管理、知识图谱、Dashboard、团队权限、Usage 修改或 Task 修改。
+
+### 15.6 N10 Hub Asset 页面冻结契约
+
+N10 只实现一个 Asset 工作台：宽屏左侧为 Asset Library / Inbox 切换、筛选和结果索引，右侧为当前选择详情；窄屏按列表、详情顺序排列。不引入 vue-router、全局状态框架、大型 UI 组件库、外部字体或图片资源。Asset 类型色只编码 MEMORY / DOCUMENT / SKILL，Markdown 阅读区优先保证正文、原始 Markdown 和 Frontmatter 的可读性；系统深浅色、可见键盘焦点、减少动态效果偏好和 390px 窄屏均属于当前页面契约。
+
+Hub API Client 只使用原生 fetch 和相对 `/api`，当前页面只调用 `GET /api/assets`、`GET /api/assets/:assetId`、`GET /api/inbox`。Client 统一解析 N09 成功/失败包络，网络失败和非 JSON 响应转换为安全前端错误；列表和详情请求同时使用 AbortController 与请求序号，旧响应不得覆盖新筛选或新选择。共享类型当前只在 Hub 本地定义，不创建 `packages/contracts`，因为 N09 Server 的运行时 Schema 仍由服务端独占，尚无需要共享实现依赖的第二个前端消费者。
+
+Asset Library 只构造 query/workspace/type/scope/limit；空值不发送，同名参数只写一次，limit 页面只提供 20/50/100。Workspace 提供“全部”“仅 GLOBAL”“精确名称”三种入口，精确输入的当前结果建议不作为权威枚举；Workspace/Scope 冲突由控件联动消除，前端不得发送 N09 非法组合。结果只显示本次返回数量，不声称 total、页数、offset 或 cursor；命中片段、分数和策略只在实际 query 结果中展示。
+
+Asset Detail 只在受控正文区域用 `v-html` 展示服务端已关闭原始 HTML 的 renderedMarkdown；rawMarkdown 与 Frontmatter 始终作为文本。详情展示 Usage 汇总和 N09 最近 Loadout 摘要，不请求完整 loadout_json。404、409 ASSET_STALE、503、500 和网络失败均有明确安全文案与显式重试，不实现自动无限重试。Inbox 每次切换或显式刷新时实时只读扫描；缺失目录的空 items/diagnostics 是正常空状态，合法候选和所有 Scanner 诊断均可选择查看，但没有确认、晋升、移动、编辑或删除操作。
+
+开发环境由 Vite 把 `/api` 代理到 `http://127.0.0.1:<port>`，默认端口 3000，可用 `CODEX_MEMORY_OS_SERVER_PORT` 覆盖；代理把 Host 和存在的 Origin 重写为目标 Node 同源，不放宽 N09 Server 安全规则。生产继续只有一个 Node 服务：从与 Server `src/`/`dist/` 同级约定稳定对应的 `apps/hub/dist` 服务 `/` 和真实 `/assets/*`；由于 N10 没有客户端路由，不启用 SPA fallback。`/mcp` 在 Node request 分发中优先，`/api/*` 在 Hono 中优先，未知 API、MCP 错误、缺失静态资源和未知页面路径均不得返回 Hub index。
+
+---
+
+## 16. REST API
+
+Hub 使用只读 REST。
+
+```text
+GET /api/assets
+GET /api/assets/:assetId
+GET /api/inbox
+GET /api/task-loadouts
+GET /api/task-loadouts/:taskId
+GET /api/usages
+GET /api/system/status
+POST /internal/task-loadouts/resolve
+POST /internal/task-loadouts/attach
+POST /internal/task-loadouts/:taskId/status
+```
+
+说明：
+
+- `/api/*` 为 Hub 查询接口；
+- `/internal/*` 只供 Hook 和本地组件执行 Task Resolve、显式跨 Session Attach 和最小状态更新；
+- MVP 不提供浏览器写 Asset 接口；
+- 后续若增加写接口，必须重新设计本地安全边界。
+
+### 16.1 N09 只读 REST 冻结契约
+
+N09 只实现上述七个 `GET /api/*`，不实现 `/internal/*`、Hub 页面或任意浏览器写接口。Hub 是个人本地全库只读界面，可以查看全部 Workspace；该能力不改变 MCP 的 `taskId → Task.workspace → AssetSearchContext` 可信隔离链。
+
+统一列表规则：只接受各接口明确列出的查询参数；未知、重复、空参数和非法枚举返回 `400`；`limit` 默认 `20`、范围 `1～100`；不实现 `offset`、`cursor` 和 `total`。成功响应固定为 `{ok:true,data}`，失败响应固定为 `{ok:false,error:{code,message,retryable}}`。参数错误为 `400`，非法 Host/Origin 为 `403`，资源或路由不存在为 `404`，已知 API 路由的非 GET 方法为 `405`，Catalog 与当前 Markdown 冲突为 `409`，暂时不可用为 `503`，未预期内部错误或持久化 Schema 损坏为 `500`；只有 `409/503` 的 `retryable=true`。
+
+`GET /api/assets` 只接受 `query/workspace/type/scope/limit`，只返回正式 Catalog Asset：
+
+- `workspace` 省略表示全部 GLOBAL 和全部 Workspace；`workspace=null` 只表示 GLOBAL；具体字符串表示 GLOBAL 与该 Workspace；
+- `workspace=null&scope=WORKSPACE`、`workspace=<name>&scope=GLOBAL` 为 `INVALID_FILTER_COMBINATION`；
+- 有 query 且指定具体 Workspace 时完整复用 N05 字段匹配、分数和当前 Workspace 优先级；workspace 省略或为 NULL 时不增加 Workspace 权重，同分按 `modified_at DESC, asset_id ASC`；无 query 时按相同时间和 ID 顺序；
+- Asset 模块复用 N05 的三路搜索、当前 Markdown 复核、Hash、路径和刷新能力，HTTP 层不实现第二套搜索。
+
+`GET /api/assets/:assetId` 不接受 Workspace 参数，可以读取任意正式 Asset。Catalog 无记录返回 `404 ASSET_NOT_FOUND`；Catalog 有记录但当前文件删除、移动、失效或 Hash 不一致时，调用既有 Scanner/Index 刷新并在当前请求返回 `409 ASSET_STALE`，不返回旧 Markdown，下一请求按刷新结果返回 `200/404`。Detail 返回 Asset 元数据、相对路径、Frontmatter、原始 Markdown、由关闭原始 HTML 的 Markdown Renderer 生成的渲染 HTML、Usage 汇总，以及最多 10 条按 `task.updated_at DESC, task.task_id DESC` 排列的 Loadout 摘要；不返回完整 `loadout_json`，也不返回永远为真的资格字段。
+
+`GET /api/inbox` 每次只读扫描 `inbox/`，复用 N03 Scanner 的 Frontmatter、Workspace、路径、类型、单 Markdown、Symlink、普通文件和重复 ID 校验，不写 Catalog、FTS 或 Usage。缺少 `inbox/` 返回空 items/diagnostics；仓库根不可访问、Workspace 配置不可用、Scanner 整体失败或 Snapshot 不完整返回 `503`。Inbox 内部重复 ID 使用 Scanner 诊断；与正式 Catalog ID 冲突的候选返回 `ID_CONFLICT` 并退出 items，不影响正式 Asset。
+
+`GET /api/task-loadouts` 和 `GET /api/task-loadouts/:taskId` 直接调用 N08 `TaskLoadoutApplicationService.list/get`，保持已冻结的 workspace/status/limit、排序、严格 Loadout 和关联 Usage/assetMissing DTO。`GET /api/usages` 只接受 `taskId/assetId/workspace/limit`，全部条件按 AND；workspace 省略表示全部、NULL 表示 `Task.workspace IS NULL`、字符串表示精确 Task Workspace；Usage 模块从 `task_loadout.workspace` 查询 Workspace、以 LEFT JOIN Catalog 计算 `assetMissing`，按 `usage.updated_at DESC, usage.usage_id DESC` 排列，HTTP 层不拼写 Usage SQL。
+
+`GET /api/system/status` 返回实时计算的 `service/repository/index/mcpEndpoint/diagnostics`，不建状态表。公开 `READY/DEGRADED/REBUILD_REQUIRED`，降级或待重建仍返回 `200`；MCP readiness 仅表示本进程 `/mcp` 端点是否就绪，不声明 Codex 客户端已连接。只有该接口本身无法形成任何有意义状态时返回 `500`。
+
+`/api/*` 只接受精确 `127.0.0.1:<当前端口>` Host；Origin 可缺省，存在时必须是相同 HTTP Origin；不发送通配 CORS，N10 开发服务器通过同源代理访问。只有 System Status 可以返回 Asset Repository 绝对路径；其他响应只返回仓库相对路径，不返回 SQLite、日志、配置绝对路径、Stack、SQL 或内部异常对象。N09 Schema 留在 Server `http/contracts`，等 N10 确有前后端重复 DTO 时再评估提取 `packages/contracts`。
+
+---
+
+## 17. 索引更新
+
+### 17.1 启动
+
+服务启动时：
+
+1. 校验 Asset Repository；
+2. 读取并校验 `workspaces.json`，全量扫描 `assets/`，形成完整 Scan Snapshot；
+3. 校验 Frontmatter；
+4. 检查重复 ID；
+5. 计算 Content Hash；
+6. 与 Catalog 对比；
+7. 在同一事务中应用 Catalog/FTS 差异；
+8. 启动 Asset Markdown 与 `workspaces.json` 的文件监听。
+
+### 17.2 增量
+
+监听：
+
+- Asset Markdown 新建、修改、删除和重命名；
+- `workspaces.json` 修改、删除或重新出现。
+
+事件先防抖合并，再重新执行一次完整 N03 Scanner，形成完整 Scan Snapshot。完整 Scanner 统一处理有效 Asset、无效 Frontmatter、重复 ID、未知类型、未知 Workspace、路径/Scope/Workspace/Frontmatter 冲突、文件重命名、同路径更换 Asset ID、同一 Asset ID 移动路径、Symlink 和非普通单 Markdown 文件。
+
+更新原则：资格判断全量，数据库写入增量。完整 Snapshot 与旧 Catalog 比较得到 `removed / invalidated / changed / added / unchanged`，在一个事务中先删除前三类的旧 FTS rowid 和旧 Catalog 行，再写入 `changed / added` 的新 Catalog 和 FTS；任一步失败整体回滚。文件一旦变为无效，对应旧 Catalog/FTS 记录必须在本次有效 Snapshot 更新中删除，同时在 System Status 展示诊断，不得为了可用性继续返回旧索引。
+
+整体扫描失败与“空仓库”必须区分。Asset Repository 根目录不可读、`workspaces.json` 整体无法读取、Scanner 异常退出或无法确认 Snapshot 完整性时，不应用该结果、不批量删除旧 Catalog/FTS，设置 `indexState = DEGRADED` 或 `REBUILD_REQUIRED` 并记录原因。
+
+### 17.3 手动重建
+
+提供：
+
+```text
+codex-memory index rebuild
+```
+
+删除并重建 Catalog/FTS，不影响 Task Loadout 和 Usage 表。
+
+---
+
+## 18. 可靠性与安全边界
+
+### 18.1 最小安全规则
+
+- 服务只监听 `127.0.0.1`；
+- 禁止通配 CORS；
+- Asset Repository 路径来自配置白名单；
+- 禁止路径穿越；
+- 禁止读取仓库之外的文件；
+- Symlink 拒绝索引；
+- REST Hub 当前只读；
+- MCP 修改动作仅限 Usage 和 Task 状态；
+- 不保存 API Key、Token 或数据库凭据到 Asset；
+- 日志不得输出完整敏感 Markdown。
+
+### 18.2 降级
+
+| 故障 | 行为 |
+|---|---|
+| Node 服务不可用 | Codex 正常工作，但知识工具不可用 |
+| MCP 不可用 | Hook 注入极短错误提示，不阻断 Codex |
+| SQLite Catalog 损坏 | 重建索引 |
+| Task/Usage 表损坏 | 可清空，Asset 不受影响 |
+| 单个 Markdown 解析失败 | 该 Asset 立即退出 Catalog/FTS，其他 Asset 继续使用，Hub 显示错误 |
+| 重复 Asset ID | 所有冲突 Asset 立即退出 Catalog/FTS，要求人工修复 |
+| 整体 Scan Snapshot 不完整 | 不应用扫描结果，不批量删除旧索引，标记 DEGRADED 或 REBUILD_REQUIRED 并记录原因 |
+| 文件监听失败 | 退化为手动/定时重建 |
+
+---
+
+## 19. 测试策略
+
+### 19.1 单元测试
+
+- 无下划线 Snowflake ID 格式、前缀校验、并发唯一性、时钟回退不重复和 BigInt JSON 边界；
+- Frontmatter Schema；
+- Asset 类型和 Scope；
+- 单文件 Content Hash；
+- 重复 ID、无效 Frontmatter、未知 Workspace、路径冲突、未知类型、非 Markdown 和 Symlink 的 fail-closed 行为；
+- Workspace 路径匹配；
+- FTS 字面查询转义、Unicode code point 长度和 FTS/LITERAL/HYBRID 路由；
+- 内部可信 Workspace Context 在 NULL、当前 Workspace 和其他 Workspace 下的资格过滤；
+- Loadout JSON Schema；
+- Task Turn Binding 和 Hook 重试幂等；
+- Usage Recall/Read 计数与 Used 幂等标记；
+- Search/Read/Mark Used 统一 Workspace 资格与排序。
+
+### 19.2 集成测试
+
+- Markdown → Catalog → FTS → MCP Search/Read；
+- `better-sqlite3` 候选按顺序探针，单个失败继续、全部失败才阻断；
+- Node 22.16.0 原生模块加载、数据库创建/关闭、SQLite 版本/source ID、FTS5/trigram/contentless-delete 能力；
+- contentless-delete INSERT/MATCH/DELETE/重新插入与 Catalog/FTS 事务回滚；
+- Asset Markdown 或 `workspaces.json` 变化后完整 Snapshot、增量差异写入和整体失败保护；
+- 删除 SQLite 后重建；
+- Hook → Task → Task Turn Binding → Task Loadout → MCP；
+- 同一 Task 跨 Turn、跨 Session 显式 attach；
+- Stop、Interrupt、SessionEnd 不自动结束 Task；
+- HTTP MCP 连接、重连和错误处理；
+- STDIO Adapter 转发；
+- Asset 文件修改后的索引刷新；
+- 有效 Asset 改成无效后不再返回旧索引；
+- Asset 删除后 Usage 历史仍可查询；
+- Hub REST 与数据库查询。
+
+### 19.3 Golden Query
+
+建立固定任务集：
+
+- 同 Workspace 必须命中的 Asset；
+- 不同 Workspace 必须不命中的 Asset；
+- GLOBAL Asset 应该命中；
+- DOCUMENT 只应进入按需读取；
+- 空结果不扩大范围；
+- 中文、英文、代码符号混合查询。
+- 中文单字/双字 LITERAL、三字及以上 FTS、长短词 HYBRID、默认 AND 和 FTS 特殊字符字面查询。
+
+### 19.4 消融实验
+
+安全和正确性边界不参与消融：
+
+```text
+Workspace 隔离
+assets / inbox 边界
+Asset ID
+Content Hash
+精确 Asset Read
+```
+
+后续只比较：
+
+```text
+A0：Workspace + FTS
+A1：A0 + Task Loadout
+A2：A1 + 摘要注入
+A3：A2 + 手工 Required Assets
+A4：A3 + 自动场景识别
+```
+
+当前只实现到 A2。A3/A4 只有在真实数据证明漏召回问题后再考虑。
+
+---
+
+## 20. 分阶段实施
+
+### N00：HTTP MCP Ping Spike
+
+独立且最先执行。只实现 `ping`，完成 14.2 节的 CLI/Desktop、协议握手、启动顺序、重启恢复、多窗口、`required=false`、localhost、Host/Origin 和端口占用验证；不得实现 Asset、SQLite、Task、Loadout、Usage 或 Hub。直接 HTTP 不稳定时才验证只桥接同一 `/mcp` 的薄 STDIO Adapter。
+
+### N01：Node/TypeScript/Vue 项目骨架
+
+建立 pnpm workspace、Node.js 22.16.0、TypeScript strict、Hono 服务、Vue 3 空壳和统一测试入口；不引入业务模型。
+
+### N02：通用 IdGenerator
+
+选择并验证成熟、维护正常且兼容 Node.js 22 的开源 Snowflake 实现，以统一 `IdGenerator` 输出 `ast`、`tsk`、`usg` 字符串；覆盖无下划线格式、并发唯一性、时钟回退不重复和 BigInt JSON 边界，不冻结自定义位协议。
+
+### N03：Asset Schema、Scanner、Content Hash、Workspace 校验
+
+实现三种 Asset 的 Frontmatter Schema、普通单 Markdown Scanner、实际字节 SHA-256、目录与 Frontmatter 一致性以及未知 Workspace、重复 ID、未知类型、无效 Frontmatter、非 Markdown、目录 Asset、Symlink 的 fail-closed 诊断。
+
+### N04：SQLite Catalog、FTS 和索引状态
+
+按 `better-sqlite3@12.11.1`、`13.0.3` 的顺序执行目标机器探针，锁定首个全部通过的精确版本；实现 contentless-delete trigram FTS、可删除重建的 Catalog/FTS、Asset Markdown 与 `workspaces.json` Watcher 防抖、完整 N03 Scan Snapshot、全量资格判断、增量 SQLite 差异事务、无效 Asset 立即退出检索以及 `indexState`、`rebuildRequired`、最后成功扫描时间和诊断 DTO。单个候选失败不提前阻断；整体扫描失败不得作为空仓库应用；不实现正式 Search 路由、短词内存缓存、Task、MCP 或 Usage。
+
+### N05：Asset Search/Read 与 Golden Query
+
+实现接收内部可信 `AssetSearchContext` 的纯 Application Service Search/Read、字面查询清理和转义、按 Unicode code point 的 FTS/LITERAL/HYBRID 路由、GLOBAL/WORKSPACE 资格判断、当前 Markdown 读取、确定性排序、`searchStrategy` 与 Golden Query；不依赖 Task、Hook、MCP 或 Usage。N06/N07 再把外部 `taskId` 解析为 `Task.workspace` 并构造内部 Context。
+
+### N06：Task、Task Turn Binding 和 Hook
+
+实现 `task_loadout`、`task_turn_binding`、cwd 可信 Workspace、Hook 重试幂等、同 Session 复用、跨 Session 显式 attach 和最小显式状态更新；不保存对话正文，不从 Stop、Interrupt 或 SessionEnd 自动推导终态。
+
+### N07：HTTP MCP 业务工具
+
+在 N00 已验证的传输上实现 `asset_search`、`asset_read`、错误契约和参数 Schema，并根据 taskId 获取可信 Workspace；直接 HTTP 不稳定时才实现薄 STDIO Adapter。
+
+### N08：Task Loadout 与 Usage
+
+实现精简 Loadout JSON、RUNNING 时服务端整体覆盖、`task_asset_usage`、Recall/Read 计数、Used 幂等标记以及 `task_loadout_get/list`、`asset_mark_used`；DTO 按 `task_id + asset_id` 关联 usageId，不把 Usage 写入 JSON。
+
+### N09：Hub 只读 REST API
+
+实现 Asset、Inbox、Task Loadout、Usage、System Status 的只读计算 DTO；不新增写 Asset、写 Usage 或写 Task 的 Hub API。
+
+### N10：Hub Asset 页面
+
+实现 Asset 列表、搜索与筛选、Markdown/原文/Frontmatter/路径/Hash/修改时间/命中信息展示，并保持 Hub 只读。
+
+### N11：Hub Task、Usage、System Status 页面
+
+实现 Task Loadout、Usage 和 System Status 的只读页面，展示精简 JSON、数组顺序、关联 Usage 和索引/Workspace 诊断，不建设 Dashboard 或状态表。
+
+### N12：Inbox 到 assets 的人工确认命令
+
+实现只针对用户明确确认文件的受控命令，校验 Frontmatter、路径和移动前后 Hash；Hub 继续只读。
+
+### N13：集成测试、消融实验和运行文档
+
+完成端到端验证、Golden Query、A0/A1/A2 消融、安装/启动/停止/排错说明和旧知识整理接入验收。
+
+依赖关系固定为：
+
+```text
+N00 独立最先执行
+
+N01 → N02 → N03 → N04 → N05
+N06 依赖 N01、N02 和 N03 的 Workspace 契约
+N07 依赖 N00、N05、N06
+N08 依赖 N06、N07
+N09 依赖对应后端 DTO
+N10 依赖 N05、N09
+N11 依赖 N08、N09
+N12 依赖 N02、N03、N04
+N13 最后执行
+```
+
+旧知识任务 M00～M02 可在 Asset 文件契约确定后提前进行；M03 依赖 IdGenerator、Asset Schema 和 Inbox 写入规则；M04 依赖 Catalog、Search、Read；M05 依赖新 MCP 已稳定。具体任务以配套人工整理设计 Revision 2.1 为准。
+
+---
+
+## 21. 任务状态表
+
+| 任务 | 状态 | 完成内容 | 修改文件 | 测试结果 | 未解决问题 | 下一任务输入 | 简短总结 |
+|---|---|---|---|---|---|---|---|
+| N00 | DONE | 完成独立 Streamable HTTP `ping` 服务、协议客户端、生命周期/并发/安全测试和实测报告 | `spikes/n00-http-mcp-ping/`、本文 | Node 22.16.0 类型检查通过；自动测试 6/6；真实 CLI 在线、并发、延迟启动、`required=false`、同会话重启通过；生产依赖审计 0 漏洞；Fresh Desktop Task 首次调用和同任务停服/重启后调用通过；用户指定 Luna 子代理与独立 SDK 客户端并发，服务端观测 `activePingCalls=2` | 无阻断项；已知既有 Desktop 任务不会热加入新 MCP，`required=true` 的连接拒绝重试窗口有限 | N01 使用 Node.js 22.16.0 建立 Node/TypeScript/Vue 项目骨架；不携带临时 N00 MCP 注册 | CLI、Fresh Desktop Task 与独立 Codex 客户端并发均证明直连 HTTP 可用，不实现 STDIO Adapter |
+| N01 | DONE | 建立最小 pnpm workspace、Node/TypeScript/Hono Server、Vue/Vite Hub、统一命令和健康检查 Smoke Test | 根工程配置、`apps/server/`、`apps/hub/`、`README.md`、本文 | Node 22.16.0 + pnpm 11.1.3 安装成功；根 typecheck、test（1/1）、build 通过；Server `/health` 与 Hub dev 均返回 HTTP 200；测试端口和 N00 端口均无残留监听；`git diff --check` 通过 | 无阻断项；主机默认 Node 25.9.0，须按版本约束使用 Node 22.16.0 | N02 只实现通用 IdGenerator，不进入 Asset、Scanner 或其他后续能力 | 最小可运行骨架验收通过，未实现任何业务模型或 N02+ 能力 |
+| N02 | DONE | 实现通用 `IdGenerator`、集中三前缀、`snowflake.io@4.1.2` 包装、格式校验和进程内时钟回退 fail-fast | `packages/id-generator/`、`pnpm-workspace.yaml`、`pnpm-lock.yaml`、本文 | Node 22.16.0 包级与根 typecheck/build 通过；根测试 5/5，其中 N02 4/4；20,000 并发调用底层数值唯一；回退明确抛错；JSON 边界为字符串；构建产物运行通过；官方 registry 生产依赖审计 0 漏洞；`git diff --check` 通过 | 无阻断项；跨进程重启且主机时间早于上次进程水位不在 Revision 2.1 的 N02 契约内，本轮未声称验证 | N03 只实现 Asset Schema、Scanner、Content Hash 与 Workspace 校验，不进入 SQLite/Catalog；当前处于知识库重建阶段，不新增 Engineering Memory，不发起 Capture Proposal | 单机通用 ID 纵切验收通过，未冻结自定义位协议或引入持久化、worker 注册、ID 服务 |
+| N03 | DONE | 使用 Zod 定义 Asset/Workspace Schema；使用 gray-matter 扫描正式 `assets/` 单 Markdown 文件；计算实际字节 SHA-256；对 Workspace、目录、Frontmatter、重复 ID 和文件类型执行 fail-closed 校验 | `apps/server/package.json`、`apps/server/src/asset/`、`apps/server/test/asset-scanner.test.ts`、`pnpm-lock.yaml`、本文 | Node 22.16.0 + pnpm 11.1.3 包级 typecheck/test（Server 6/6，其中 N03 5/5）/build 通过；根 typecheck/test（10/10）/build、frozen-lock 安装、忽略规则与 `git diff --check` 通过 | 无阻断项；测试仅使用临时目录，未向正式 Asset Repository 写入知识；SQLite/Catalog/FTS/Watcher/Search/Read 均未实现 | N04：SQLite Catalog、FTS 和索引状态；复用 N03 的成功 Asset 与诊断结果，不改变已冻结文件资格语义 | N03 文件契约纵切验收通过，所有重复或无效 Asset 均不会进入成功扫描结果 |
+| N04 | DONE | 锁定 `better-sqlite3@12.11.1`；实现固定 Catalog/contentless-delete trigram FTS、完整 Snapshot、增量差异事务、原子重建、Watcher 防抖和索引状态诊断 | `apps/server/package.json`、`apps/server/src/asset/`、`apps/server/test/asset-index.test.ts`、`apps/server/test/asset-scanner.test.ts`、`apps/server/test-support/`、`pnpm-workspace.yaml`、`pnpm-lock.yaml`、本文、N04/N05 专项方案 | darwin/arm64 上 Node 22.16.0 + pnpm 11.1.3 探针通过，SQLite 3.53.2；Server 14/14、根 18/18，包级/根 typecheck 与 build、frozen-lock、`git diff --check` 通过 | 无阻断项；仅验证目标 macOS ARM，未实现 N05 Search/Read | N05：Asset Search/Read 与 Golden Query；复用 N04 Catalog/FTS 和 N03 Scanner，不改变 Workspace 资格边界 | N04 派生索引纵切验收通过，完整性失败保留最后一致索引，N05 保持未实现 |
+| N05 | DONE | 实现可信 Workspace Context 下的 FTS/LITERAL/HYBRID Search、唯一 FTS 字面转义、Unicode code point 路由、AND、确定性排序与 `score`、当前 Markdown Read、陈旧索引刷新和 Golden Query；回归加固 N04 双 Watcher 与目录事件 | `apps/server/package.json`、`apps/server/src/asset/search.ts`、`apps/server/src/asset/scanner.ts`、`apps/server/src/asset/index.ts`、`apps/server/src/asset/index-manager.ts`、`apps/server/test/asset-search.test.ts`、本文、N04/N05 专项方案 | Node 22.16.0 + pnpm 11.1.3；Server 19/19、根 23/23；包级/根 typecheck 与 build、frozen-lock、`git diff --check` 通过；20 次 LITERAL 中位 0.307 ms/最大 1.839 ms，HYBRID 中位 0.193 ms/最大 0.22 ms | 无阻断项；性能仅为目标机临时 Golden Query fixture，不外推到未来大规模正式仓库；未实现 N06+ | N06：Task、Task Turn Binding 和 Hook；从可信 cwd/配置产生 Workspace，再调用 N05 Context，不向外暴露 workspace/path 覆盖 | N05 纯 Application Search/Read 纵切完成，无正文缓存、Task、MCP、Usage 或 REST |
+| N06 | DONE | 实现固定 Task/Binding Schema、可信 cwd Workspace Resolver、事务化 Task 解析、Hook 重试幂等、同 Session 复用、跨 Session 显式 attach、最小显式终态更新和 UserPromptSubmit Hook | `apps/server/src/task/`、`apps/server/src/hook/`、`apps/server/test/task.test.ts`、`apps/server/test/hook.test.ts`、`apps/server/package.json`、本文 | Node 22.16.0 + pnpm 11.1.3；Server 37/37、根 41/41；包级/根 typecheck 与 build、frozen-lock、构建后 Hook smoke、忽略检查和 `git diff --check` 通过 | 同一 Session 若经显式 attach 关联多个同 Workspace RUNNING Task，现有固定 Schema 不能排除歧义；当前明确 fail closed 并要求显式 taskId，不按时间猜测，未来若改成唯一约束或选择规则须先确认 | N07：在 N00 已验证的 HTTP MCP 传输上实现业务工具，并只按 taskId 读取可信 Task.workspace；不得让 MCP 调用方覆盖 Workspace，不进入 N08 Loadout/Usage | N06 完成 SQLite Task 纵切和当前 Codex UserPromptSubmit 命令 Hook；新建与 binding 同事务、重试/并发幂等、终态只显式更新，N07 仍未实现 |
+| N07 | DONE | 在主 Server 接入 N00 已验证的无状态 Streamable HTTP `/mcp`，注册严格参数 Schema 的 `asset_search`、`asset_read`；按 taskId 读取可信 `Task.workspace` 并复用 N05 Search/Read；实现结构化业务错误、Host/Origin 防护、运行时配置和安全日志 | `apps/server/package.json`、`apps/server/src/main.ts`、`apps/server/src/runtime.ts`、`apps/server/src/mcp/`、`apps/server/src/task/service.ts`、`apps/server/src/asset/search.ts`、`apps/server/src/asset/index.ts`、`apps/server/test/mcp.test.ts`、`apps/server/test-support/mcp-build-smoke.mjs`、`pnpm-lock.yaml`、本文 | Node 22.16.0 + pnpm 11.1.3；Server 46/46、根 50/50；包级/根 typecheck 与 build、frozen-lock、构建产物真实 HTTP MCP smoke、忽略/残留检查和 `git diff --check` 通过 | 无阻断项；未修改用户 Codex/MCP 全局配置，因此未声称 Fresh Desktop Task 的正式 N07 配置接入；该客户端兼容性已由同版本 SDK 的 N00 直连结论与 N07 独立 SDK 集成验证覆盖，正式配置安装留待运行部署 | N08：只实现 Task Loadout 与 Usage；在 N07 工具链上增加 Recall/Read/Used、usage_id、RUNNING Loadout 整体覆盖和 `asset_mark_used`、`task_loadout_get/list`，不得进入 REST/Hub | N07 只读 HTTP MCP 纵切完成；Workspace/path 不可外部覆盖，Search/Read 无 Usage 或 Loadout 副作用，不需要 STDIO Adapter |
+| N08 | DONE | 实现显式 Task Loadout Resolve、严格精简 JSON/统一 Renderer、固定策略与 reason 码、`task_asset_usage`、Recall/Read/Used、Usage fail-open 日志，以及六个严格 Schema 的 MCP 工具 | `apps/server/src/loadout/`、`apps/server/src/usage/`、`apps/server/src/logging.ts`、`apps/server/src/task/`、`apps/server/src/hook/`、`apps/server/src/mcp/`、`apps/server/src/runtime.ts`、`apps/server/test/loadout.test.ts`、`apps/server/test/usage.test.ts`、`apps/server/test/logging.test.ts`、`apps/server/test/mcp.test.ts`、`apps/server/test/hook.test.ts`、`apps/server/test-support/mcp-build-smoke.mjs`、`.gitignore`、本文 | Node 22.16.0 + pnpm 11.1.3；Server 60/60、根 64/64；包级/根 typecheck、test、build、frozen-lock、构建产物真实 MCP smoke、忽略/残留检查和 `git diff --check` 通过 | 无阻断项；未修改用户 Codex/MCP/Hook 全局配置，未验证正式长期数据与 Fresh Desktop 配置安装；MVP 200/300 阈值及 3000/8 预算需在真实 Task 中继续消融验证 | N09：只实现 Hub 只读 REST API，为 Asset、Inbox、Task Loadout、Usage、System Status 提供计算 DTO；不得新增浏览器写接口或进入 Hub 页面实现 | N08 完成 Human-First 的显式 Loadout 与非关键 Usage 纵切；Task 自动创建不自动装配，终态只冻结 Loadout 更新，不禁止历史查询和补记 Usage |
+| N09 | DONE | 实现七个 Hub 只读 REST、全库 Asset List/Detail、实时 Inbox、N08 Loadout DTO、Usage 查询和计算型 System Status；冻结严格参数、统一包络、状态码、localhost Host/Origin 与路径脱敏 | `apps/server/src/http/`、`apps/server/src/app.ts`、`apps/server/src/runtime.ts`、`apps/server/src/asset/`、`apps/server/src/loadout/service.ts`、`apps/server/src/usage/`、`apps/server/test/rest.test.ts`、`apps/server/test-support/rest-build-smoke.mjs`、`apps/server/package.json`、`pnpm-lock.yaml`、本文 | Node 22.16.0 + pnpm 11.1.3；Server 67/67、根 71/71；包级/根 typecheck、test、build、frozen-lock、真实 REST smoke、N08 MCP smoke 和 `git diff --check` 通过 | 无阻断项；未使用正式 Asset Repository 或正式长期数据，未修改用户 Codex/MCP/Hook 配置；未实现 Hub 页面或 N10+ | N10：只实现 Asset Library、Asset Detail 和 Inbox 只读页面，复用 N09 DTO 与 Vite 同源代理；不得新增写接口、Dashboard、Task/Usage/System Status 页面或 N11+ | N09 完成个人本地全库只读 Hub API，MCP Workspace 隔离和 N08 Usage/Loadout 写语义保持不变 |
+| N10 | DONE | 实现只读 Asset Desk：Asset Library 搜索/Workspace/类型/Scope/limit、Asset Detail 三视图与 Usage/最近 Loadout、Inbox 候选与全类 Scanner 诊断、加载/空/错误/重试/请求竞争处理、响应式和可访问性；接入 Vite 同源代理与单 Node 构建静态服务 | `apps/hub/`、`apps/server/src/app.ts`、`apps/server/src/runtime.ts`、`apps/server/test/hub-static.test.ts`、`apps/server/test-support/hub-build-smoke.mjs`、`apps/server/package.json`、`pnpm-lock.yaml`、本文 | Node 22.16.0 + pnpm 11.1.3；Hub 16/16、Server 68/68、根 88/88；包级/根 typecheck、test、build、frozen-lock、真实 Vite proxy、Hub+REST 构建产物、N09 REST、N08 MCP smoke、桌面/390px 浏览器检查和 `git diff --check` 通过 | 无阻断项；仅使用并清理系统临时 fixture，未写正式 Asset Repository、Engineering Memory、Memory-Candidates 或 HumanReview，未修改用户全局 Codex/MCP/Hook 配置；未实现 N11+ | N11：只实现 Task Loadout、Usage、System Status 只读页面，复用 N08/N09 DTO；不得建设 Dashboard、状态表、写操作、自动 Loadout/终态或 N12+ | N10 完成个人本地只读 Asset 工作台；浏览器只读边界、N09 REST/MCP Workspace 语义和单 Node 生产形态保持不变 |
+| N11 | DONE | 扩展只读 Hub 为 Assets、Task Loadouts、Usage、System Status 四视图；Task 展示冻结 Loadout 原始顺序/JSON/关联 Usage，Usage 保持 AND 查询与独立事实，System Status 展示计算三态、未知计数、诊断和 MCP endpoint 边界；统一加载/空/错误/重试/竞争保护、响应式和键盘可访问性 | `apps/hub/src/App.vue`、`apps/hub/src/styles.css`、`apps/hub/src/api/`、`apps/hub/src/views/`、本文 | Node 22.16.0 + pnpm 11.1.3；Hub 43/43、Server 68/68、根 115/115；包级/根 typecheck、test、build、frozen-lock、Vite proxy、Hub+REST、N09 REST、N08 MCP smoke、桌面/390×844 浏览器和 `git diff --check` 通过 | 无阻断项；只使用并清理临时/内存 fixture，未写正式 Asset Repository、Engineering Memory 或外部系统；未验证其他操作系统和正式长期数据 | N12：只实现用户明确确认文件的 Inbox→assets 受控命令，继续保持 Hub 只读；不得顺带实现 Hub 写操作、Dashboard、状态历史或 N13 | N11 完成三个只读运行视图并直接复用 N08/N09 契约；未增加 Server、写方法、分页推断、自动轮询或第二套关联规则 |
+| N12 | DONE | 实现单文件 Inbox→assets 人工确认命令，以 `relativePath + expectedContentHash` 绑定确切文件和字节；复用完整 Scanner 校验 Frontmatter、路径、Workspace、Asset ID/重复与正式冲突；使用排他复制、移动前后实际 Hash、源文件复扫和失败清理完成受控移动 | `apps/server/src/asset/confirmation.ts`、`apps/server/src/asset/confirm-cli.ts`、`apps/server/src/asset/scanner.ts`、`apps/server/src/asset/index.ts`、`apps/server/test/asset-confirmation.test.ts`、`apps/server/test-support/asset-confirm-build-smoke.mjs`、`apps/server/package.json`、本文 | Node 22.16.0 + pnpm 11.1.3；N12 专项 11/11、Server 79/79、Hub 43/43、根 126/126；包级/根 typecheck、test、build、frozen-lock、N12 命令、Vite proxy、Hub+REST、N09 REST、N08 MCP smoke 和 `git diff --check` 通过；A0/A1 反事实通过 | 无 N12 Gate 阻断项；只在当前 macOS 系统临时目录验证本地文件系统语义，未写正式 Asset Repository；源删除后若遭遇命令外部的目标文件并发破坏，命令会安全报错并要求人工核对，不建设分布式锁或恢复平台 | N13：只进行已规划的集成验收、A0/A1/A2 Loadout 消融和运行文档；复用 N12 命令，不新增 Hub/REST/MCP 写入口或确认状态 | N12 完成确切路径与确切 Hash 绑定的 Human-First 受控移动；正式性仍只由 `assets/` 表达，Catalog 仍是派生索引，Hub 保持只读 |
+| N13 | DONE | 完成同一临时 fixture 的端到端集成验收、19.3 Golden Query、A0/A1/A2 Loadout 消融、M03/M04 合成接入、运行文档和只读边界回归 | `README.md`、`apps/server/package.json`、`apps/server/test/n13-integration.test.ts`、`apps/server/test-support/n13-e2e-build-smoke.mjs`、本文 | Node 22.16.0 + pnpm 11.1.3；N13 专项 2/2、Server 81/81、Hub 43/43、IdGenerator 4/4、根 128/128；包级/根 typecheck/test/build、frozen-lock、六个构建 smoke、临时目录 Runbook 实跑、桌面/窄屏浏览器和 `git diff --check` 通过 | 无 N13/MVP Gate 阻断项；仅验证目标 macOS ARM 与确定性临时 fixture，N00 CLI/Desktop 传输兼容性沿用前序证据，未验证正式长期数据、网络文件系统或其他操作系统 | M00～M05 保持 NOT_STARTED；后续只能在新的独立任务和明确授权下开始 M00 | MVP 最终技术验收完成；A1 证明稳定选择，A2 证明 DIRECT 摘要注入的增量收益，旧知识仅证明合成技术接入条件 |
+
+状态只使用：
+
+```text
+NOT_STARTED
+IN_PROGRESS
+DONE
+BLOCKED
+```
+
+### 21.1 每个任务的完成记录模板
+
+```markdown
+## <任务编号> 完成记录
+
+- 状态：DONE / BLOCKED
+- 完成内容：
+- 修改文件：
+- 测试命令与结果：
+- 未解决问题：
+- 下一任务输入：
+- 简短总结：
+```
+
+### 21.2 新对话启动模板
+
+```text
+请执行 CodexMemoryOS 任务 <任务编号>。
+
+唯一依据：
+1. 本设计文档；
+2. 仓库当前源码；
+3. 上一任务的完成记录。
+
+本轮只完成 <任务编号>，禁止顺带实施下一任务。
+先核对任务目标、完成条件和当前仓库状态。
+完成后更新任务状态表和完成记录。
+不要执行 Git commit 或 push。
+无法证明的事实标记为 UNKNOWN，不要自行补齐。
+```
+
+### 21.3 N00 完成记录
+
+- 状态：DONE
+- 完成内容：实现独立、无业务模型的 Streamable HTTP `/mcp` 与只读 `ping`；完成 SDK 协议、生命周期、并发、Host/Origin、端口占用以及真实 Codex CLI 验证；形成可复现实测报告。
+- 修改文件：`spikes/n00-http-mcp-ping/`；`设计文档/codex-memory-os-design-revision-2.md`。
+- 测试命令与结果：Node 22.16.0 `tsc --noEmit` 通过；Node Test 6/6 通过；当前 Codex CLI 真实 Tool Call、双客户端并发、`required=false`、同一持久会话停服/重启、Codex 先启动且服务在重试窗口内后启动均通过；Fresh Desktop Task 首次调用和同任务停服/重启后调用通过；用户指定 Luna 子代理替代第二个可见窗口，与独立 SDK 客户端在五秒窗口内重叠调用，服务端观测 `activePingCalls=2`；官方 npm registry 生产依赖审计 0 漏洞。
+- 未解决问题：无阻断项。已知当前 Desktop build 的既有任务不会热加入新 MCP；`required=true` 且服务约 2.5 秒后才启动时，当前 CLI 会在三次连接拒绝重试后退出。并发项采用用户明确指定的独立 Codex 子代理替代方案，不声称执行了两个可见 UI 窗口。
+- 下一任务输入：移除临时 `codex_memory_os_n00` 全局配置并停止测试服务；下一独立任务执行 N01，只建立 Node/TypeScript/Vue 项目骨架，不顺带实现 N02。
+- 简短总结：Streamable HTTP MCP 已对当前 Codex CLI、Fresh Desktop Task、服务重启恢复和独立 Codex 客户端并发证明可用；没有实现 STDIO Adapter 的必要性，N00 关闭。
+
+### 21.4 N01 完成记录
+
+- 状态：DONE
+- 完成内容：建立仅含 `apps/server` 与 `apps/hub` 的 pnpm workspace；固定 Node.js 22.16.0 与 pnpm 11.1.3；启用共享 TypeScript strict；实现 Hono 最小启动入口和 `/health`；实现 Vue 3 + TypeScript + Vite 启动页；提供根 build、typecheck、test、dev 命令和健康检查 Smoke Test。
+- 修改文件：`.gitignore`、`.npmrc`、`.nvmrc`、`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`tsconfig.base.json`、`README.md`、`apps/server/`、`apps/hub/`、`设计文档/codex-memory-os-design-revision-2.md`。
+- 测试命令与结果：Node 22.16.0 + pnpm 11.1.3 `pnpm install` 成功且 workspace 仅包含根、Server、Hub；根 `pnpm typecheck` 通过并确认 Server/Hub 生效配置均为 `strict: true`；根 `pnpm test` 通过，Smoke Test 1/1；根 `pnpm build` 通过，Server 生成 `dist` 且 Hub 完成 Vite production build；根 `pnpm dev` 同时启动 Server/Hub，`GET http://127.0.0.1:43100/health` 返回 HTTP 200 与 `{"status":"ok"}`，`GET http://127.0.0.1:5173/` 返回 HTTP 200；停止后 `43100`、`5173` 与 N00 `47831` 均无监听；`node_modules` 与构建输出均被忽略；`git diff --check` 通过。
+- 未解决问题：无阻断项。主机默认 Node.js 为 25.9.0，必须使用 `.nvmrc` 或 README 中的 `npx -p node@22.16.0 -p pnpm@11.1.3` 方式进入固定运行环境。
+- 下一任务输入：N02：通用 IdGenerator。只选择并验证兼容 Node.js 22 的 Snowflake 实现与统一字符串 ID 输出，不进入 N03 的 Asset Schema、Scanner、Content Hash 或 Workspace 校验。
+- 简短总结：N01 最小工程骨架全部验收通过；N00 Spike 保持独立且未被纳入 workspace，本轮没有实现业务 REST、MCP、SQLite、Asset、Task、Usage、Hub 业务页面或任何 N02+ 能力。
+
+### 21.5 N02 完成记录
+
+- 状态：DONE
+- 完成内容：新增 `@codex-memory-os/id-generator` workspace 包；集中定义 `ast`、`tsk`、`usg` 前缀和 `IdGenerator` 接口；使用 `SnowflakeIdGenerator` 包装 `snowflake.io@4.1.2`；固定单机 `id=0`，进程内时钟回退时明确抛错；所有公共输出和校验边界均使用无下划线字符串。
+- 修改文件：`packages/id-generator/package.json`、`packages/id-generator/tsconfig.json`、`packages/id-generator/tsconfig.build.json`、`packages/id-generator/src/index.ts`、`packages/id-generator/test/id-generator.test.ts`、`pnpm-workspace.yaml`、`pnpm-lock.yaml`、`设计文档/codex-memory-os-design-revision-2.md`。
+- 测试命令与结果：Node 22.16.0 + pnpm 11.1.3 安装与 frozen-lock 安装通过；包级 typecheck、test、build 通过；根 typecheck、test、build 通过，根测试共 5/5、N02 测试 4/4；实际生成并校验 `ast`、`tsk`、`usg` 三种无下划线十进制字符串；20,000 个并发调用按去除前缀后的 Snowflake 数值检查无重复；模拟系统时间回退 10 秒时生成器明确抛错；`JSON.stringify` 只接收字符串 ID；Node 22.16.0 直接导入构建产物并生成三类 ID 成功；官方 npm registry 生产依赖审计 0 已知漏洞；`git diff --check` 通过。
+- 未解决问题：无阻断项。当前测试和实现保证同一 Node 进程内的回退 fail-fast；跨进程重启且系统时间早于上一进程最后时间的历史水位检测未由 Revision 2.1 要求，本轮未增加持久化或 Asset 扫描，也不声称该场景已经验证。
+- 下一任务输入：N03：Asset Schema、Scanner、Content Hash、Workspace 校验。只实现三类 Frontmatter、普通单 Markdown 扫描、实际字节 SHA-256 和 fail-closed Workspace/路径诊断，不进入 N04 SQLite Catalog、FTS 或 Watcher。当前处于知识库重建阶段，不新增 Engineering Memory，不发起 Capture Proposal；Revision 1 和历史 Memory 只能作为背景，不覆盖 Revision 2.1 与当前仓库事实。
+- 简短总结：N02 以一个独立、可替换的 workspace 包完成统一 ID 纵切，复用维护中的开源 Snowflake 实现并以明确失败守住时钟回退边界；没有实现 N03 或后续能力。
+
+### 21.6 N03 完成记录
+
+- 状态：DONE
+- 完成内容：在 Server Asset 领域实现 `MEMORY`、`DOCUMENT`、`SKILL` 与 `GLOBAL`、`WORKSPACE` 的严格 Zod Frontmatter Schema，Asset ID 直接复用 `@codex-memory-os/id-generator` 的 `validate(id, "ast")`；核验并固定 `zod@4.5.4`、`gray-matter@4.0.3`；实现 `schemaVersion=1` 的 `workspaces.json` 读取与校验、只扫描正式 `assets/` 的普通单 Markdown Scanner、当前文件实际字节 SHA-256，以及未知 Workspace、路径/Scope/Workspace/类型冲突、重复 ID、未知类型、Frontmatter 缺失或无效、非 Markdown、目录 Asset、Symlink、非普通文件的 fail-closed 诊断；重复 ID 的全部冲突文件均退出成功结果，`inbox/` 不进入扫描。
+- 修改文件：`apps/server/package.json`、`apps/server/src/asset/schema.ts`、`apps/server/src/asset/scanner.ts`、`apps/server/src/asset/index.ts`、`apps/server/test/asset-scanner.test.ts`、`pnpm-lock.yaml`、`设计文档/codex-memory-os-design-revision-2.md`。
+- 测试命令与结果：Node 22.16.0 + pnpm 11.1.3 下，`pnpm --filter @codex-memory-os/server typecheck`、`test`、`build` 全部通过，Server 测试 6/6，其中 N03 5/5；根 `pnpm typecheck`、`test`、`build` 全部通过，根测试合计 10/10；`pnpm install --frozen-lockfile` 通过且 workspace 为 4 个项目；`node_modules` 和 Server/Hub/IdGenerator 的 `dist` 均由 `.gitignore` 命中且未出现在 Git 状态中；`git diff --check` 通过。
+- 未解决问题：无阻断项。测试数据全部位于系统临时目录，未创建或写入正式 Asset Repository；本轮未实现 SQLite、Catalog、FTS、Watcher、增量索引、Asset Search/Read、MCP、Hook、Task、Loadout、Usage、REST、Hub 业务页面或 Inbox 移动命令。
+- 下一任务输入：N04：SQLite Catalog、FTS 和索引状态。N04 应直接消费 N03 的成功 Asset 和诊断结果，实现可删除重建的 Catalog/FTS、全量与增量索引、Watcher、无效 Asset 立即退出检索以及索引状态 DTO，不改变 N03 已冻结的 Schema、Content Hash、Workspace 与目录资格语义。
+- 简短总结：N03 完成最小 Asset 文件契约纵切；三类 Asset、两类 Scope、Workspace 配置、实际字节 Hash 与正式目录资格均可独立验证，所有规定的无效输入均明确诊断并 fail closed，未进入 N04 或后续能力。
+
+### 21.7 N04 完成记录
+
+- 状态：DONE
+- 完成内容：按固定候选顺序首先在独立临时目录和独立子进程探测 `better-sqlite3@12.11.1`，其在 darwin/arm64、Node.js 22.16.0、pnpm 11.1.3 下全部通过，因而锁定该精确版本并按 Gate 停止，未测试 `13.0.3`；实际 SQLite 为 `3.53.2`，source ID 为 `2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24`，`sqlite_compileoption_used('ENABLE_FTS5')=1`，真实 FTS5/trigram/contentless-delete DDL/DML、普通 DELETE、重新插入、事务回滚以及 1/2/3+ Unicode 字符边界均通过；锁定 `chokidar@5.0.0` 和 `@types/better-sqlite3@9.6.0`。实现固定 `asset_catalog`/`asset_fts` Schema、启动结构与 rowid 一致性检查、完整 Snapshot 的 `added/changed/invalidated/removed/unchanged` 差异、先删旧 FTS/旧 Catalog 再写新 Catalog/新 FTS的单事务、原子全量重建；N03 Scanner 只做向后兼容补充，新增 `isComplete`、`fileSize`、`modifiedAt`，不改变已有 Asset 资格语义；实现 Markdown 与 `workspaces.json` Watcher、防抖串行刷新，以及不落库的 `NOT_READY/READY/DEGRADED/REBUILD_REQUIRED`、`rebuildRequired`、`lastSuccessfulScanAt`、Watcher 状态、Catalog/FTS 数量和 Scanner/N04 Diagnostics DTO。
+- 修改文件：`apps/server/package.json`、`apps/server/src/asset/catalog.ts`、`apps/server/src/asset/index-manager.ts`、`apps/server/src/asset/scanner.ts`、`apps/server/src/asset/index.ts`、`apps/server/test/asset-index.test.ts`、`apps/server/test/asset-scanner.test.ts`、`apps/server/test-support/better-sqlite3-capability-probe.cjs`、`pnpm-workspace.yaml`、`pnpm-lock.yaml`、`设计文档/codex-memory-os-design-revision-2.md`、`/Users/hemu/Downloads/codex-memory-os-n04-n05-fts-short-query-solution-revision-2.md`。
+- 测试命令与结果：隔离候选探针安装、require/import、内存库、文件库、25 次连续打开关闭、SQLite 信息、FTS5/trigram/contentless-delete、中文/英文 3+ 字符 MATCH、1/2 字符不命中、普通 DELETE、删除后不命中、重新插入和 Catalog/FTS 回滚全部通过，子进程退出码 0；`pnpm --filter @codex-memory-os/server typecheck/test/build` 全部通过，Server 14/14，Watcher 测试连续两轮通过；根 `pnpm typecheck/test/build` 全部通过，根测试 18/18；`pnpm install --frozen-lockfile`、构建产物忽略检查和 `git diff --check` 通过。所有命令均由 Node.js 22.16.0 + pnpm 11.1.3 执行。
+- 未解决问题：无阻断项。能力结论仅覆盖本次目标机器 darwin/arm64；其他平台为 UNKNOWN，但不属于 N04 Gate。测试 Asset、SQLite 和能力探针均位于系统临时目录，未向正式 Asset Repository 写入知识；未实现 N05 的 Search/Read、FTS/LITERAL/HYBRID 路由、Golden Query、缓存、Task、Hook、MCP、Usage、REST、Hub 业务页面或 Inbox 命令。
+- 下一任务输入：N05：Asset Search/Read 与 Golden Query。复用 N04 的固定 Catalog/FTS、N03 Scanner 和可信 Workspace 资格边界，实现纯 Application Search/Read 与 Golden Query；不得回退到传统 contentless 特殊 delete command，不新增正文缓存，不依赖 N06 Task。
+- 简短总结：N04 在目标 macOS ARM 上完成首个候选 Gate 和可重建派生索引纵切；完整 Snapshot 才应用增量事务，单个无效 Asset 立即退出，整体扫描失败保留最后一致 Catalog/FTS，结构或 rowid 不一致明确要求全量重建；N03 仍为 DONE，N05 仍为 NOT_STARTED。
+
+### 21.8 N05 完成记录
+
+- 状态：DONE
+- 完成内容：实现纯 Application `AssetSearchService`，内部只接收可信 `AssetSearchContext.workspace`，不依赖 Task；查询执行 trim、Unicode 空白拆分、英文大小写折叠和 Unicode code point 计数，全部长词走 FTS、全部短词走 LITERAL、长短混合走 HYBRID，全部搜索项保持 AND；长词只通过唯一双引号字面转义函数进入 FTS5，不把用户输入解释为 MATCH 语法。SQL 先按 GLOBAL/当前 Workspace 过滤 Catalog/FTS 候选，再通过 N03 共享校验只读取候选当前 Markdown，不扫描其他 Workspace；无效、删除、ID/资格变化或 Catalog 指纹过期时跳过结果、记录诊断并触发 N04 完整刷新。实现 title/summary/body、当前 Workspace、BM25 和 Asset ID 的确定性排序，冻结同查询内分数越高越优的 `score`；`matchedSnippet`、Search 元数据和 Read 的完整 Markdown/Hash 均来自当前已验证文件。全仓并发回归暴露 N04 Watcher 的目录创建时序问题，已拆分 Asset/Workspace 配置 Watcher、对 Asset `addDir/unlinkDir` 触发完整扫描，并让文件系统集成测试单并发执行。未建立正文缓存，也未实现 Task、Hook、MCP、Usage、REST 或 Hub。
+- 修改文件：`apps/server/package.json`、`apps/server/src/asset/search.ts`、`apps/server/src/asset/scanner.ts`、`apps/server/src/asset/index.ts`、`apps/server/src/asset/index-manager.ts`、`apps/server/test/asset-search.test.ts`、`设计文档/codex-memory-os-design-revision-2.md`、`/Users/hemu/Downloads/codex-memory-os-n04-n05-fts-short-query-solution-revision-2.md`。
+- 测试命令与结果：Node.js 22.16.0 + pnpm 11.1.3 下，`pnpm --filter @codex-memory-os/server typecheck/test/build` 全部通过，Server 19/19，其中 N05 5/5，完整 Server 套件连续三轮通过；根 `pnpm typecheck/test/build` 全部通过，根测试 23/23；`pnpm install --frozen-lockfile`、构建产物忽略检查和 `git diff --check` 通过。Golden Query 覆盖中文单字/双字/长词、英文短词/长词、代码标识、引号/星号/括号/减号/AND/OR/NOT、FTS/LITERAL/HYBRID、默认 AND、大小写、GLOBAL/当前/其他 Workspace、`workspace=null`、稳定排序、limit、当前 Markdown Read、删除/失效/陈旧索引刷新和路径穿越拒绝。最终根级目标机临时 fixture 各执行 20 次：LITERAL 中位 `0.307 ms`、最大 `1.839 ms`；HYBRID 中位 `0.193 ms`、最大 `0.22 ms`，没有支持正文缓存的性能证据。
+- 未解决问题：无阻断项。性能数据来自当前 darwin/arm64 目标机上的临时 Golden Query fixture，只证明当前实现和样本规模不需要缓存，不外推到未来大规模正式 Asset Repository；本轮未向正式 Asset Repository 写入测试知识。N06 Task、Task Turn Binding、Hook，以及 N07 MCP/错误传输契约仍未实现。
+- 下一任务输入：N06：Task、Task Turn Binding 和 Hook。N06/N07 必须从可信 cwd 和服务端 Task 记录构造 `AssetSearchContext`，不得允许外部调用方直接选择 Workspace 或传入文件路径；复用 N05 Search/Read，不改变三路查询、AND、排序和当前 Markdown 复核语义。
+- 简短总结：N05 完成无缓存、Workspace 隔离的纯 Application Search/Read 与 Golden Query；短词直接读取当前合格 Markdown，混合查询先 FTS 缩小候选再字面过滤，长词统一安全转义，陈旧索引 fail closed 并触发刷新；N04/N05 均为 DONE，N06 仍为 NOT_STARTED。
+
+### 21.9 N06 完成记录
+
+- 状态：DONE
+- 完成内容：严格创建并校验固定 `task_loadout`、`task_turn_binding` 和 `idx_task_turn_binding_task_id`，每个 Task SQLite 连接显式启用并验证 `foreign_keys=1`；Task 使用已有 `IdGenerator` 生成无下划线 `tsk` ID，只保存初始 `request`，不在主表保存 Session/Turn。复用 N03 `workspaces.json` 读取与严格 Schema，从当前 Hook `cwd` 按路径段边界执行最长路径匹配，无匹配写入 `workspace=NULL`，配置不可读、无效或同等最长路径属于多个 Workspace 时 fail closed。Task Repository 以 `BEGIN IMMEDIATE` 事务严格执行“已有 Turn binding → 显式 taskId attach → 同 Session/同 Workspace 唯一 RUNNING Task 复用 → 新建并绑定”；新 Task 和 binding 同事务，固定复合主键保证一个 Turn 最多一个 Task，6 个独立 Hook 进程并发重试只产生 1 个 Task 和 1 条 binding。显式 attach 校验 Task 存在、RUNNING 且 Workspace 严格一致（包括 NULL），通过提示词中的 `taskId: tsk...` 或 `taskId=tsk...` 跨 Session 继续。状态只支持显式 `RUNNING → COMPLETED/CANCELLED`，终态不可恢复或继续 attach。`loadout_json` 只写满足 N06 非空约束的 `schemaVersion=1`、`maxInjectedCharacters=3000`、`maxAssets=8`、`assets=[]`，未调用 N05 Search 或实现 N08 装配/Usage。按目标机 `codex-cli 0.153.2` 和 2026-09-04 当前 OpenAI Hooks 文档实现命令 Hook：官方 `session_id/turn_id/cwd/prompt` 从 stdin JSON 映射为内部输入，成功退出 0 并用 `hookSpecificOutput.additionalContext` 输出 taskId、可信 workspace、status 和最小空 Loadout；输入、配置、Task 或 Workspace 校验失败退出 2 并向 stderr 输出带错误码诊断。提供只含 `UserPromptSubmit` 的配置对象生成器和构建后入口 `pnpm --filter @codex-memory-os/server hook:user-prompt-submit`，运行时要求绝对路径环境变量 `CODEX_MEMORY_OS_DATABASE_PATH`、`CODEX_MEMORY_OS_WORKSPACES_PATH`；未安装或修改用户全局/项目 Hook 配置。Stop、Interrupt、SessionEnd 只做无输出 no-op，不读写 Task 状态。
+- 修改文件：`apps/server/package.json`、`apps/server/src/task/model.ts`、`apps/server/src/task/errors.ts`、`apps/server/src/task/repository.ts`、`apps/server/src/task/service.ts`、`apps/server/src/task/workspace-resolver.ts`、`apps/server/src/task/index.ts`、`apps/server/src/hook/user-prompt-submit.ts`、`apps/server/test/task.test.ts`、`apps/server/test/hook.test.ts`、`设计文档/codex-memory-os-design-revision-2.md`。
+- 测试命令与结果：Node.js 22.16.0 + pnpm 11.1.3 下，`pnpm --filter @codex-memory-os/server typecheck/test/build` 全部通过，Server 37/37，其中新增 N06 18/18；`pnpm typecheck/test/build` 最终独立执行全部通过，根测试 41/41；`pnpm install --frozen-lockfile` 通过且锁文件无改动；构建后的 `dist/hook/user-prompt-submit.js` 在系统临时目录用真实子进程执行成功，退出码 0、stderr 为空、输出为 `UserPromptSubmit` additionalContext、`tsk` ID、可信 Workspace、RUNNING 和空 assets；`git diff --check`、新增文件尾随空白检查、`node_modules`/`dist`/SQLite/临时 Hook 配置忽略与残留检查通过。测试覆盖固定表/索引/外键、ID、创建与 binding、同 Turn 顺序及并发重试幂等、同 Session 复用、Workspace 切换、最长路径与 `/foo/bar`/`/foo/barista` 边界、NULL Workspace、跨 Session attach 及不存在/终态/Workspace 不一致拒绝、一个 Turn 不重复绑定、绑定失败整体回滚、两种合法终态和非法迁移、生命周期事件不改状态、N04 Catalog/FTS rebuild 保留 Task、Hook 输入输出/退出码/错误诊断，以及不持久化 transcript/messages/ConversationHistory。首次把根 typecheck/test/build 三个命令并发运行时，既有 N04 Watcher 用例一次在 5 秒轮询内超时，而 N06 18/18 全部通过；按项目既定单并发测试方式、无并行构建负载独立重跑后 Server 37/37、根 41/41 通过，未修改或放宽 N04 用例。
+- 未解决问题：现有固定 Schema 允许同一 Session 通过不同 Turn 显式 attach 多个同 Workspace RUNNING Task，无法从约束唯一决定后续默认复用对象；当前实现检测到多个候选时返回 `AMBIGUOUS_RUNNING_TASK` 并要求当前 Turn 显式携带 taskId，不按创建或绑定时间猜测。未来若要从数据层排除该状态，或定义自动选择规则，会改变 Task/Session 语义，须先确认后在后续独立任务处理。本轮仅以官方文档、本机版本和隔离子进程验证命令 Hook 协议，未获授权修改 Hook 配置，因此没有声称已在真实 Codex 生命周期中安装触发；所有 Hook 配置、输入、SQLite 和测试文件均位于系统临时目录。没有写正式 Asset、Engineering Memory、Memory-Candidates 或 HumanReview，也未发起 Knowledge Capture Proposal。
+- 下一任务输入：N07：HTTP MCP 业务工具。复用 N00 已验证的 Streamable HTTP `/mcp` 传输、N05 `AssetSearchService` 和 N06 Task Repository；外部工具只接收 taskId，再由服务端读取 `Task.workspace` 构造可信 `AssetSearchContext`，实现 `asset_search`、`asset_read`、参数 Schema 和错误契约。不得接收 Workspace/path 覆盖，不修改 N06 Task 解析语义，不实现 N08 正式 Loadout 装配、`task_asset_usage`、Recall/Read/Used 或 `usage_id`。
+- 简短总结：N06 已完成最小 Task/Turn/Hook 闭环：cwd 决定可信 Workspace，Turn binding 优先保证重试幂等，显式 taskId 支持安全跨 Session attach，同 Session 仅在候选唯一时默认复用，Task 创建与 binding 原子提交，终态只能显式更新；Hook 输出保持最小空 Loadout，N05 保持 DONE，N07 保持 NOT_STARTED。
+
+### 21.10 N07 完成记录
+
+- 状态：DONE
+- 完成内容：精确复用 N00 已验证且当前 npm registry 最新的 `@modelcontextprotocol/sdk@1.30.0`，在主 Server 的 `http://127.0.0.1:<port>/mcp` 接入无状态 Streamable HTTP MCP，每个 HTTP 请求使用独立 MCP Server/Transport，保留固定 localhost、精确 Host 和 Origin 防护，不实现 STDIO Adapter。只注册 `asset_search` 与 `asset_read`，参数对象严格拒绝额外字段；Search 外部只接收 `taskId/query/limit`，Read 外部只接收 `taskId/assetId`，均不接收 Workspace 或任意文件路径。N07 通过新增的 Task Application `getTask` 校验 taskId、确认 Task 存在并读取可信 `Task.workspace`，再构造内部 `AssetSearchContext` 调用 N05；没有复制 FTS/LITERAL/HYBRID、AND、排序、limit、当前 Markdown 复核、Hash、路径或 Workspace 资格规则。主设计只对 Hook attach 和 N08 Loadout 更新明确要求 RUNNING，N07 Search/Read 本身为无副作用只读操作，因此现有 RUNNING、COMPLETED、CANCELLED Task 均可查询其冻结 Workspace，没有新增未经设计授权的状态限制。
+- 错误契约：MCP Schema 错误继续由 SDK 作为无结构化业务体的参数错误返回；工具业务错误稳定返回 `isError=true`、文本 `[code] message` 和 `{ok:false,error:{code,message,retryable}}`。当前代码区分 `TASK_ID_INVALID`、`TASK_NOT_FOUND`、`SEARCH_INPUT_INVALID`、`ASSET_ID_INVALID`、`ASSET_NOT_FOUND`、`ASSET_NOT_ACCESSIBLE`、`WORKSPACE_CONFIG_UNAVAILABLE`、`ASSET_INDEX_UNAVAILABLE`、`INTERNAL_ERROR`；错误体和运行日志不返回完整 Markdown、SQLite 内容、堆栈或任意文件路径。N05 Read 仅增加“Catalog 中不存在”与“存在但当前 Context 不可访问”的最小分类，以及当前资格整体无法确认时的显式不可用错误，实际读取和资格复核仍由原服务执行。
+- 运行时与成功响应：Server 启动时使用绝对路径环境变量 `CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH`、`CODEX_MEMORY_OS_DATABASE_PATH`、`CODEX_MEMORY_OS_WORKSPACES_PATH` 初始化 N04 Index/Watcher、N06 Task Repository 和 N05 Search Service；端口继续使用 `PORT`，只监听 `127.0.0.1`。`asset_search` 成功返回文本 JSON 与 `{ok:true,items:[...]}` 结构化内容；`asset_read` 成功返回文本 JSON 与 `{ok:true,asset:{frontmatter,markdown,contentHash}}` 结构化内容。意外错误只记录错误类型，不记录敏感消息或堆栈；关闭时停止 HTTP 连接、Watcher 和 SQLite 连接。
+- 修改文件：`apps/server/package.json`、`apps/server/src/main.ts`、`apps/server/src/runtime.ts`、`apps/server/src/mcp/tools.ts`、`apps/server/src/mcp/http.ts`、`apps/server/src/mcp/index.ts`、`apps/server/src/task/service.ts`、`apps/server/src/asset/search.ts`、`apps/server/src/asset/index.ts`、`apps/server/test/mcp.test.ts`、`apps/server/test-support/mcp-build-smoke.mjs`、`pnpm-lock.yaml`、本文。
+- 测试命令与结果：所有 pnpm 命令均通过 Node.js 22.16.0 + pnpm 11.1.3 的固定 `npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm ...` 入口串行执行。Server 包级 typecheck、test、build 通过，Server 46/46，其中新增 N07 9/9；根 typecheck、test、build 通过，根测试 50/50；`pnpm install --frozen-lockfile` 通过。构建后执行 `pnpm --filter @codex-memory-os/server smoke:mcp:build`，真实启动 `dist/main.js`，以临时 Asset Repository、Workspace 配置和 SQLite 完成 initialize、tools/list、`asset_search`、`asset_read`、当前 Markdown 和 `/health` 验证。`git diff --check`、`node_modules`/`dist` 忽略检查、SQLite/WAL/SHM 残留、监听端口和测试进程残留检查均通过。
+- 覆盖范围：验证两个工具注册及严格 Schema，Workspace/path/filePath 外部覆盖拒绝，合法/非法/不存在 taskId，Task→Workspace 信任链，GLOBAL、当前 Workspace、其他 Workspace 与 `workspace=NULL` 隔离，Asset ID 无效、不存在、无权限、当前文件删除/失效，FTS/LITERAL/HYBRID、AND、确定性排序与 limit，当前 Markdown 和当前 Hash，Workspace 配置与索引不可用、内部错误脱敏，成功/业务错误结构，HTTP 初始化、Host/Origin、协议解析错误、服务离线、同客户端服务重启恢复、服务后启动重连、8 客户端并发隔离，N07 不创建 `task_asset_usage`、不修改 `loadout_json`，以及 Catalog rebuild 后 Task 和 MCP 查询继续可用。N06 Hook/Task 和 N05 Golden Query 随 Server/根全量套件回归通过。
+- 未解决问题：无 N07 Gate 阻断项。本轮没有修改用户全局 Codex/MCP 配置或正式 Asset Repository，因此不声称已完成正式部署配置下的 Fresh Desktop Task 调用；N00 已对相同 SDK/传输完成当前 CLI、Fresh Desktop、同会话停服重启与并发兼容性证明，N07 另以真实 HTTP SDK 客户端和构建产物验证业务工具。正式运行配置、长期数据和外部客户端安装仍属于部署边界。没有写入 Engineering Memory、Memory-Candidates 或 HumanReview，也未发起 Knowledge Capture Proposal。
+- 下一任务输入：N08：Task Loadout 与 Usage。只在 N06 Task/N07 工具链之上实现精简 `loadout_json` 整体覆盖、`task_asset_usage`、独立 `usage_id`、Recall/Read 计数、Used 幂等标记，以及 `asset_mark_used`、`task_loadout_get`、`task_loadout_list`；只有 RUNNING Task 可更新 Loadout，DTO 通过 `task_id + asset_id` 关联 Usage。Usage 对终态 Task 的写入语义须结合主设计和 N07 允许终态 Task 只读查询的现状在 N08 逐项核实，不得自行扩大或弱化。不得改变 N05 Search/Read 和 N07 Workspace 信任链，不得实现 REST、Hub、自动终态、ConversationHistory 或 N09+。
+- 简短总结：N07 已完成最小只读 HTTP MCP 业务纵切：调用方只能给 taskId 和查询/精确 Asset ID，服务端从 Task 取得可信 Workspace 后复用 N05；协议错误与稳定业务错误分层明确，并发和重连已验证，Search/Read 不产生任何 N08 Usage 或 Loadout 副作用。N06、N07 为 DONE，N08 保持 NOT_STARTED。
+
+### 21.11 N08 完成记录
+
+- 状态：DONE
+- 完成内容：保持 N06 Task 创建、复用、跨 Session attach 和生命周期语义不变，UserPromptSubmit 只读取并通过统一 Renderer 输出已有 Loadout，不自动首次装配或按 Turn 刷新；新增严格输入的 `task_loadout_resolve(taskId)`，仅在 Agent 获得用户 Y 后由调用方显式使用，服务端从 Task 读取初始 `request` 和可信 `workspace`，复用 N05 Search 排序与资格规则，内部候选 Search 不记录 Recall。策略集中冻结为 minScore=`200`、DIRECT MEMORY minScore=`300`、maxInjectedCharacters=`3000`、maxAssets=`8`；DOCUMENT/SKILL 始终 ON_DEMAND，reason 只保存固定字符串枚举码。Renderer 按完整 Hook 文本的 Unicode code point 计数，不截断 title/summary；DIRECT 超预算降为 ON_DEMAND，ON_DEMAND 仍超预算则整项排除；每项 `estimatedCharacters` 是最终实际渲染片段字符数。Loadout JSON 使用严格 Schema，仍只保存 schemaVersion、limits、assets 及 assetId/mode/reason/estimatedCharacters；相同 JSON 不 UPDATE、不改 updated_at，不同 JSON 仅对 RUNNING Task 整体覆盖，终态可读但不可 resolve。
+- Usage 与日志：新增并严格校验固定 `task_asset_usage`，每个连接显式启用并验证 `foreign_keys=1`，复用统一 IdGenerator 生成 JSON-safe `usg` ID；Usage 模块独占 BEGIN IMMEDIATE 原子 upsert、Recall/Read 累计和 Used 0→1 幂等更新，保留首次胜出 usage_id 与 created_at，重复 Used 不修改 updated_at，不对可重建 Catalog 建外键。`asset_search` 仅对最终实际返回项批量原子记录 Recall，空结果、过滤项及 limit 外结果不写；`asset_read` 仅在当前 Markdown 成功取得后记录 Read；`asset_mark_used` 先复用相同 Task.workspace 和 N05 当前 Asset 资格检查，再显式设置 Used，Read 不自动等于 Used。RUNNING、COMPLETED、CANCELLED 均允许 Search/Read/Mark Used；只有 Loadout 更新受 RUNNING 限制。Search/Read 的非关键 Usage 写入失败时整批回滚、结构化记录日志并继续返回已取得业务结果；Mark Used 写入失败返回 `USAGE_WRITE_FAILED`。统一日志默认写 `<project-root>/logs/codex-memory-os.log`，支持一个绝对路径环境配置，`logs/` 已忽略；日志包含时间、级别、事件、操作、Task/Asset、错误码、错误消息和堆栈，不记录 Markdown、完整 Prompt 或凭据。
+- MCP 与查询：主 MCP 现注册 `asset_search`、`asset_read`、`asset_mark_used`、`task_loadout_resolve`、`task_loadout_get`、`task_loadout_list` 六个工具；均严格拒绝未知字段，调用方仍不能提交 Workspace、路径或 Asset 列表。`task_loadout_get` 返回固定 Task 字段、结构化 Loadout 及按 taskId+assetId 关联的 Usage DTO，Catalog 删除后的历史 Usage 保留并标记 `assetMissing=true`。`task_loadout_list` 支持 workspace 省略/精确字符串/NULL、status 可选、limit 默认 20 且范围 1～100，按 updated_at DESC、task_id DESC 稳定排序；assetCount 和 estimatedCharacters 从 loadout_json 即时派生，不增加普通列或分页状态。
+- 修改文件：`.gitignore`、`apps/server/src/loadout/errors.ts`、`apps/server/src/loadout/index.ts`、`apps/server/src/loadout/policy.ts`、`apps/server/src/loadout/projection-repository.ts`、`apps/server/src/loadout/renderer.ts`、`apps/server/src/loadout/service.ts`、`apps/server/src/usage/errors.ts`、`apps/server/src/usage/index.ts`、`apps/server/src/usage/model.ts`、`apps/server/src/usage/repository.ts`、`apps/server/src/usage/service.ts`、`apps/server/src/logging.ts`、`apps/server/src/task/model.ts`、`apps/server/src/task/repository.ts`、`apps/server/src/task/index.ts`、`apps/server/src/hook/user-prompt-submit.ts`、`apps/server/src/mcp/tools.ts`、`apps/server/src/mcp/index.ts`、`apps/server/src/runtime.ts`、`apps/server/test/loadout.test.ts`、`apps/server/test/usage.test.ts`、`apps/server/test/logging.test.ts`、`apps/server/test/mcp.test.ts`、`apps/server/test/hook.test.ts`、`apps/server/test-support/mcp-build-smoke.mjs`、本文。
+- 测试命令与结果：所有 pnpm 命令均由 Node.js 22.16.0 + pnpm 11.1.3 固定入口串行执行。Server 包级 typecheck、test、build 通过，Server 60/60；根 typecheck、test、build 通过，根测试 64/64；`pnpm install --frozen-lockfile` 通过且锁文件无变化。构建后真实启动 `dist/main.js` 完成 initialize、tools/list、六个工具、当前 Markdown、Usage 计数/Used、显式 Resolve、Get/List 和 `/health` smoke。覆盖固定 Usage Schema/外键/唯一约束/usg 字符串、多进程并发首次 Recall 单行不丢计数、批量 Recall 原子回滚、Read 计数、Used 幂等与时间戳、空/实际返回/limit Recall、失败 Read/越权 Used、GLOBAL/当前/其他/NULL Workspace、终态 Usage、Asset missing、Catalog rebuild 保留 Task/Usage、严格 Loadout JSON、199/200/299/300 边界、DOCUMENT/SKILL ON_DEMAND、最多 8 项、完整 Renderer 3000 字符预算、稳定顺序、空 Loadout、显式 Resolve、相同 JSON 不更新、终态拒绝、列表筛选/排序/limit、Usage fail-open 与结构化日志，以及 N04～N07 全量回归。`git diff --check`、忽略和残留检查通过。
+- 未解决问题：无 N08 Gate 阻断项。MVP 的 200/300 分数阈值、3000 字符和 8 Asset 限制只完成当前 Golden fixture 与边界验证，尚无正式长期 Task 数据和消融结论，不外推为永久产品参数。未修改用户 Codex/MCP/Hook 全局配置或正式 Asset Repository，因此不声称完成 Fresh Desktop 的正式安装触发；未实现后台刷新、Loadout Revision/CAS、Usage Event/Settlement、Outcome、REST、Hub、Dashboard 或 N09+。
+- 下一任务输入：N09：Hub 只读 REST API。只在 N08 的严格 Loadout/Usage Application DTO 上实现 Asset、Inbox、Task Loadout、Usage、System Status 的只读计算接口；不得新增浏览器写 Asset、写 Usage 或写 Task 接口，不实现 Hub 页面、Dashboard、自动刷新、自动终态或 N10+。
+- 简短总结：N08 完成 Task 与 Loadout 分离的 Human-First 最小闭环：Task 可以自动创建和复用，但只有用户确认后 Agent 才显式调用 Resolve；Loadout 复用 N05 的可信 Workspace、排序和资格判断并受完整 Hook 文本预算约束；Search/Read 的 Usage 统计失败不覆盖核心业务结果，Used 保持显式幂等。N07、N08 为 DONE，N09 保持 NOT_STARTED。
+
+### 21.12 N09 完成记录
+
+- 状态：DONE
+- 完成内容：在主 Hono Server 接入七个统一包络的只读 Hub REST。Asset Library 支持 query/workspace/type/scope/limit 严格参数，全库、GLOBAL、具体 Workspace 和 Scope 组合语义按 16.1 冻结；有具体 Workspace 的搜索继续使用 N05 完整优先级，无 Workspace 上下文的全库/NULL 搜索复用同一字段匹配和分数但不伪造 Workspace 加权，无搜索按当前 Markdown `modifiedAt DESC, assetId ASC` 返回。Asset Detail 复用 N05 当前文件校验，返回 Frontmatter、原始 Markdown、安全渲染 HTML、相对路径、Hash、Usage 汇总和最多 10 条最近 Loadout 摘要；删除、移动、失效或 Hash 冲突先刷新再返回 `409 ASSET_STALE`，不泄露旧正文。Scanner 的目录根被最小参数化，使 `inbox/` 复用同一资格内核；缺目录视为空，内部重复或与正式 Catalog 的 ID 冲突只淘汰候选，不写 Catalog/FTS/Usage。Task Loadout REST 直接复用 N08 list/get；Usage 模块独占 Task/Asset/Task.workspace 的 AND 查询、稳定排序和 assetMissing 投影。System Status 实时组合进程、仓库扫描、Inbox、Index/Watcher、Catalog/FTS 和 MCP endpoint readiness，不建表、不声称客户端已连接。
+- 协议与安全：列表默认 limit=`20`、最大 `100`，拒绝未知、重复、空和非法参数，不实现 cursor/offset/total。成功固定 `{ok:true,data}`，失败固定 `{ok:false,error:{code,message,retryable}}`，状态码使用 400/403/404/405/409/503/500；409/503 可重试，其余不可重试。`/api/*` 精确校验 `127.0.0.1:<port>` Host 和同源 Origin，不发送通配 CORS。只有 System Status 展示 Asset Repository 绝对路径，其他响应及全部错误不返回 SQLite、日志、配置绝对路径、Stack、SQL 或内部异常。REST 正常查询不增加 Recall/Read/Used，不修改 `loadout_json` 或 Task 时间；只有 Detail 发现陈旧 Asset 时执行协议明确允许的既有索引刷新。未创建 `packages/contracts`，未修改 MCP Task.workspace 信任链。
+- 修改文件：`apps/server/package.json`、`pnpm-lock.yaml`、`apps/server/src/app.ts`、`apps/server/src/runtime.ts`、`apps/server/src/http/contracts/index.ts`、`apps/server/src/http/errors.ts`、`apps/server/src/http/router.ts`、`apps/server/src/http/service.ts`、`apps/server/src/http/index.ts`、`apps/server/src/asset/schema.ts`、`apps/server/src/asset/scanner.ts`、`apps/server/src/asset/search.ts`、`apps/server/src/asset/inbox.ts`、`apps/server/src/asset/index.ts`、`apps/server/src/task/repository.ts`、`apps/server/src/loadout/service.ts`、`apps/server/src/loadout/index.ts`、`apps/server/src/usage/model.ts`、`apps/server/src/usage/errors.ts`、`apps/server/src/usage/repository.ts`、`apps/server/src/usage/service.ts`、`apps/server/src/usage/index.ts`、`apps/server/test/rest.test.ts`、`apps/server/test-support/rest-build-smoke.mjs`、本文。
+- 测试命令与结果：所有 pnpm 命令均通过 Node.js 22.16.0 + pnpm 11.1.3 固定入口串行执行。Server typecheck/test/build 通过，Server 67/67，其中新增 N09 7/7；根 typecheck/test/build 通过，根测试 71/71；`pnpm install --frozen-lockfile` 通过。构建后真实启动 `dist/main.js`，七个 REST 路由、统一包络、当前 Markdown/渲染 HTML和写方法拒绝 smoke 通过；N08 构建产物六工具 MCP smoke 完整通过。测试覆盖全库/NULL/具体 Workspace、Scope 合法与非法组合、query 与无 query 排序、20/100 limit、未知/重复/空参数、Detail 404 与 Hash/移动/失效/删除 409→刷新、Usage 汇总、最近 Loadout 10 条稳定排序、Inbox 缺失/失败/Frontmatter/重复/正式 ID 冲突/未知 Workspace/路径/非 Markdown/目录/Symlink、Usage 多条件 AND 与 Asset missing、N08 Loadout List/Get、System Status 三态及降级 200、路径脱敏、Host/Origin/Method/Route、安全包络和 REST 无 Usage/Loadout/Task 写副作用；N04～N08 随全量套件回归。`git diff --check`、新增 N09 文件尾随空白、忽略与临时 fixture 清理检查通过。
+- 未解决问题：无 N09 Gate 阻断项。本轮只使用系统临时目录，未写正式 Asset Repository、Engineering Memory、Memory-Candidates 或 HumanReview，未修改用户全局 Codex/MCP/Hook 配置；System Status、REST 构建 smoke 和 SQLite 结论只覆盖当前本机进程及隔离 fixture，不代表正式长期数据已经验收。未实现 `/internal/*`、Hub 页面、Dashboard、自动 Loadout、自动 Task 终态、Usage Event/Settlement/Outcome 或 N10+。
+- 下一任务输入：N10：只实现 Asset Library、Asset Detail 和 Inbox 的只读 Hub 页面。复用 N09 REST 包络、DTO、Workspace/Scope 筛选和错误码；Vite 开发环境通过同源代理访问 `127.0.0.1` Server。不得新增浏览器写 API、Task Loadout/Usage/System Status 页面、Dashboard 或 N11+。
+- 简短总结：N09 将 Hub 的个人本地全库可见性限制在只读 REST，同时保持 MCP 必须通过 taskId 获取可信 Workspace；搜索、Loadout 和 Usage 查询语义仍由各自 Application/Repository 拥有，HTTP 只做严格协议、DTO 组合和安全错误映射。N08、N09 为 DONE，N10 保持 NOT_STARTED。
+
+### 21.13 N10 完成记录
+
+- 状态：DONE
+- 完成内容：把 Hub 骨架实现为只读 Asset Desk。Asset Library 提供 query、Workspace 三态、MEMORY/DOCUMENT/SKILL、GLOBAL/WORKSPACE 和 20/50/100 limit 控件，空值、重复参数、未知参数和非法 Workspace/Scope 组合均不会由前端发出；当前结果只显示实际返回数量，不伪造分页或 total，搜索命中片段、score 和 searchStrategy 只在已提交 query 时展示。选择 Asset 后加载全库 Detail，完整展示 title、Asset ID、类型、Scope、Workspace、Summary、relativePath、modifiedAt、contentHash、Usage 四项汇总和最近 10 条以内的 Task Loadout 摘要；Rendered、Raw Markdown、Frontmatter 三个轻量 Tab 中只有服务端 renderedMarkdown 使用受控 `v-html`，原始内容始终按文本显示。
+- Inbox 与状态：Asset Library / Inbox 使用明确切换；Inbox 切换和显式刷新都调用实时只读扫描，缺失目录的空结果显示正常空状态。合法候选展示完整元数据、Raw Markdown 和 Frontmatter；ID_CONFLICT、DUPLICATE_ASSET_ID、INVALID_FRONTMATTER、UNKNOWN_WORKSPACE、三类路径冲突、NON_MARKDOWN_FILE、DIRECTORY_ASSET、SYMLINK 和其他 Scanner 诊断均按 code/message/relativePath/可选 assetId 区分并可选择查看。Library、Detail、Inbox 都有加载、空、结构化错误和显式重试；Detail 对 404、409 ASSET_STALE、503、500 分别给出安全文案，网络失败和非 JSON 响应不展示底层异常。列表和详情使用 AbortController 加请求序号，旧请求完成也不能覆盖新筛选或新选择。
+- API Client 与只读边界：新增 Hub 本地纯 DTO 和最小原生 fetch Client，只请求相对 `/api/assets`、`/api/assets/:assetId`、`/api/inbox`，统一解析 `{ok:true,data}` 与 `{ok:false,error}`；没有 Axios、缓存层、自动重试状态机、vue-router、全局状态框架、UI 组件库或 `packages/contracts`。页面没有 Asset/Inbox 的创建、编辑、确认、晋升、移动或删除按钮，没有 Task/Usage 写入口，不发送 POST/PUT/PATCH/DELETE；没有实现 Task Loadout、Usage、System Status 独立页面、Dashboard、自动 Loadout、自动终态或 N11+。Detail 中 recentLoadouts 只使用 N09 摘要，不请求或拼装完整 loadout_json。
+- 视觉、响应式与可访问性：按个人本地知识档案工作台设计“索引签 + 阅读纸面”，类型色具有真实分类含义，ID/Hash/路径使用等宽字体；不使用营销 Hero、渐变、装饰图表、图片、外部字体、图标或动画框架。控件使用原生 button/input/select，Tab/选择状态有 ARIA 语义，全部键盘可达并提供 3px 可见焦点；支持系统深浅色和 prefers-reduced-motion。真实浏览器在桌面与 390×844 窄屏检查通过，窄屏按列表、详情顺序布局，document/body scrollWidth 未超过 viewport，控制台无 error/warning。
+- Vite 与生产静态服务：Vite `/api` 默认代理到 `127.0.0.1:3000`，允许 `CODEX_MEMORY_OS_SERVER_PORT` 覆盖合法端口，changeOrigin 并显式重写 Host/存在的 Origin，使 N09 精确 localhost 校验保持不变。生产主 Node 从固定同仓 sibling `apps/hub/dist` 提供 `/` 和真实 `/assets/*`，不新增第二服务；没有深链接需求，因此不实现 SPA fallback。`/mcp` 与 `/api/*` 保持优先，未知 API、MCP 请求、缺失静态文件和未知客户端路径不会回退到 index.html。
+- 修改文件：`apps/hub/index.html`、`apps/hub/package.json`、`apps/hub/vite.config.ts`、`apps/hub/src/main.ts`、`apps/hub/src/App.vue`、`apps/hub/src/styles.css`、`apps/hub/src/api/types.ts`、`apps/hub/src/api/client.ts`、`apps/hub/src/api/client.test.ts`、`apps/hub/src/App.test.ts`、`apps/hub/test-support/dev-proxy-smoke.mjs`、`apps/server/package.json`、`apps/server/src/app.ts`、`apps/server/src/runtime.ts`、`apps/server/test/hub-static.test.ts`、`apps/server/test-support/hub-build-smoke.mjs`、`pnpm-lock.yaml`、本文。
+- 测试命令与结果：所有 pnpm 命令均通过 Node.js 22.16.0 + pnpm 11.1.3 固定入口串行执行。Hub typecheck/test/build 通过，Vitest 16/16；Server typecheck/test/build 通过，Node Test 68/68；根 typecheck/test/build 通过，根测试合计 88/88；`pnpm install --frozen-lockfile` 与 `git diff --check` 通过。真实 Vite dev proxy smoke 验证 Hub 同源 `/api`、目标 Host/Origin；构建产物 Hub+REST smoke 验证 index、哈希 JS、Asset List/Detail 和 `/api/*`、`/mcp`、缺失资源不被 fallback；N09 七路 REST 构建 smoke 与 N08 六工具 MCP 构建 smoke 完整回归通过。测试覆盖初始列表、query、Workspace 省略/NULL/具体值、Type/Scope、非法组合抑制、20/50/100、命中字段时机、Detail 三 Tab、Usage、recentLoadouts、404/409/503/500/网络/非 JSON、Inbox 空/候选/全部指定诊断、请求竞争、无写按钮/方法、静态优先级、窄屏和键盘语义。
+- 工作区保护与未解决问题：无 N10 Gate 阻断项。开始前确认当前 N00～N09 大量 staged/unstaged/untracked 内容均属于用户资产，本轮没有覆盖、回滚、清理或提交；未修改 Revision 1、迁移设计、审查报告、`.idea` 和无关文件。所有运行 fixture、SQLite/WAL/SHM、日志和预览数据只位于系统临时目录并已清理，所有 Vite、HTTP Server、MCP、Watcher 和测试进程均已停止；未写正式 Asset Repository、Engineering Memory、Memory-Candidates 或 HumanReview，未发起 Knowledge Capture Proposal。浏览器验证只覆盖当前本机隔离 fixture 和系统字体，不外推到其他操作系统或正式长期数据。
+- 下一任务输入：N11：只实现 Task Loadout、Usage、System Status 三个只读页面，复用 N08/N09 现有 DTO、严格筛选和安全包络；Task Loadout 保持数组顺序并展示关联 Usage，System Status 仍是计算型 DTO。不得建设 Dashboard、状态表、写 API、自动 Loadout、自动 Task 终态、Usage 修改、Hub Asset 编辑/确认或 N12+。
+- 简短总结：N10 完成 Asset Library、Asset Detail 与 Inbox 的只读可视纵切，以一个无路由、无全局状态的本地知识档案工作台复用 N09 契约；开发代理和生产静态文件都保持 `127.0.0.1` 单服务安全边界，所有浏览器请求仍是 GET。N09、N10 为 DONE，N11 保持 NOT_STARTED。
+
+### 21.14 N11 完成记录
+
+- 状态：DONE
+- 页面与导航：在 N10 Asset Desk 外增加 Assets、Task Loadouts、Usage、System Status 四个一级只读视图，Assets 内继续保留 Asset Library/Inbox，不引入 vue-router、全局状态框架、UI 组件库或 Dashboard。Task Loadouts 保持双栏选择与详情；Usage 使用事实清单；System Status 使用单份当前运行报告，不创建状态历史或状态表。
+- Task Loadout：列表只构造 workspace/status/limit，Workspace 省略、NULL、精确值语义分别保留，status 只提供 RUNNING/COMPLETED/CANCELLED，limit 只提供 20/50/100；展示服务 DTO 的 request、assetCount、estimatedCharacters 和时间，不伪造 total、offset、cursor 或页数。详情直接读取 N09 `taskLoadout` DTO，展示完整 request、状态和时间；Structured Loadout 严格按服务端 assets 数组位置渲染 assetId/mode/reason/estimatedCharacters，不搜索、不重排、不刷新装配；Raw JSON 只格式化同一 loadout 对象；Associated Usage 直接展示服务返回的 usageId/Recall/Read/Used/assetMissing，不拼装第二套关联规则。没有 Resolve、Attach、Complete、Cancel 或 Loadout 写控件。
+- Usage：只构造 taskId/assetId/workspace/limit，非空条件由同一请求交给 N09 按 AND 查询；Workspace 保留省略、NULL、精确值，limit 只提供 20/50/100。每条分别展示 usageId、taskId、assetId、workspace、recallCount、readCount、usedFlag、assetMissing、createdAt、updatedAt；Asset 缺失显式标记，Used 仅显示事实，没有复选框、写入口、趋势、排行、评分、推荐或聚合请求。
+- System Status：不发送查询参数，按当前 DTO 分区展示 service、repository、index、mcpEndpoint 和 diagnostics；READY、DEGRADED、REBUILD_REQUIRED 使用明确标签，rebuildRequired 保持独立事实。formal/inbox/catalog/FTS 和最后成功扫描时间为 NULL 时显示 `Unknown / unavailable`，不伪装为 0；diagnostics 保持服务端数组顺序和安全字段。MCP 文案明确只表示本地 `/mcp` endpoint ready，不声称 Codex 客户端已连接。页面只在首次进入与用户显式 Refresh 时请求，不自动轮询、缓存或保存历史。
+- API Client、错误与竞争：扩展 N10 原生 fetch Client，只新增相对 `/api/task-loadouts`、`/api/task-loadouts/:taskId`、`/api/usages`、`/api/system/status` GET；继续统一解析 `{ok:true,data}` 与 `{ok:false,error}`，网络失败、非 JSON 和异常包络映射为安全前端错误。查询构造只写真实存在的值，同名只写一次且不发送空参数。Task 列表/详情、Usage、System Status 分别使用 AbortController 和请求序号，旧响应不能覆盖新筛选、选择或显式刷新；列表、详情和报告具备加载、正常空结果、结构化错误与显式重试。当前 DTO 重复仅限浏览器需要的纯数据形状，未证明独立 `packages/contracts` 的增量收益，因此继续不提取共享包。
+- 视觉、响应式与可访问性：延续 N10 的索引签、阅读纸面、字体、色彩、深浅色和类型化数据语言；新增有业务含义的 Loadout 顺序编号、三态标签和缺失 Asset 标记，不做营销 Hero、指标卡 Dashboard 或装饰图表。所有操作使用原生 button/input/select，一级视图、Workspace 三态、列表选择和详情 Tab 有可见当前状态，键盘可达并保留 3px 可见焦点；支持 prefers-reduced-motion。真实浏览器在 1280×720 和 390×844 检查四个页面，窄屏按列表→详情、筛选→结果、状态分区顺序布局，document scrollWidth 未超过 viewport，可见内容无横向溢出，控制台无 warning/error。
+- 只读与安全边界：Hub 源码没有 POST/PUT/PATCH/DELETE、Axios、自动重试状态机、自动轮询、Dashboard、状态表或 N12 能力；N10 Asset/Inbox 页面与单 Node/Vite 同源运行形态保持不变，Server 无修改。503、500、网络失败、非 JSON 和 Task Detail 404 均显示安全文案，不展示响应内部对象、Stack、SQL、SQLite/日志/配置路径；System Status 的 Asset Repository 路径继续是 N09 明确允许的唯一绝对路径例外。
+- 修改文件：`apps/hub/src/App.vue`、`apps/hub/src/styles.css`、`apps/hub/src/api/types.ts`、`apps/hub/src/api/client.ts`、`apps/hub/src/api/client.test.ts`、`apps/hub/src/App.test.ts`、`apps/hub/src/views/view-helpers.ts`、`apps/hub/src/views/TaskLoadoutsView.vue`、`apps/hub/src/views/TaskLoadoutsView.test.ts`、`apps/hub/src/views/UsageView.vue`、`apps/hub/src/views/UsageView.test.ts`、`apps/hub/src/views/SystemStatusView.vue`、`apps/hub/src/views/SystemStatusView.test.ts`、本文。
+- 测试命令与结果：所有 pnpm 命令均使用 Node.js 22.16.0 + pnpm 11.1.3 固定入口并按要求串行执行。Hub typecheck/test/build 通过，Vitest 43/43；Server 随根套件 typecheck/test/build 通过，Node Test 68/68；根 typecheck/test/build 通过，根测试合计 115/115；`pnpm install --frozen-lockfile` 与 `git diff --check` 通过。Vite dev proxy、构建产物 Hub+REST、N09 七路 REST、N08 六工具 MCP smoke 完整通过；真实 REST/构建 smoke 使用系统临时 Asset Repository、Inbox、Workspace 配置、SQLite 和日志并自动清理。测试覆盖初始列表、Workspace 省略/NULL/具体值、status、20/50/100、Task Detail 三 Tab、原始 Asset 顺序、mode/reason/estimatedCharacters、关联 Usage/assetMissing、Detail 404、Usage 多条件 AND/NULL/Used 只读、System 三态/NULL/diagnostics/MCP 边界、503/500/网络/非 JSON、显式刷新、请求竞争、无写方法，以及 N10 页面回归。
+- 工作区保护与未解决问题：无 N11 Gate 阻断项。开始前确认当前大量 staged/unstaged/untracked 文件均属于用户资产，本轮没有覆盖、回滚、清理、commit 或 push；没有修改 Server、N00～N10 已确认记录、迁移设计、审查报告、`.idea` 或其他无关文件。浏览器检查使用只读内存 API fixture，真实 REST/MCP/静态服务联调用系统临时目录，所有浏览器 Tab、Vite、HTTP、MCP、Watcher 和测试进程均已停止，未留下临时 SQLite/WAL/SHM 或日志。未写正式 Asset Repository、Engineering Memory、Memory-Candidates 或 HumanReview，也未发起 Knowledge Capture Proposal；本机结果不外推到其他操作系统或正式长期数据。
+- 下一任务输入：N12：只实现对用户明确确认文件的 Inbox→assets 受控命令，校验 Frontmatter、路径以及移动前后 Hash；Hub 继续只读。不得新增 Hub 写按钮/写 API、Dashboard、状态历史、自动轮询、Usage 修改、Loadout 自动刷新或 N13 能力。
+- 简短总结：N11 把 N08/N09 已冻结的 Task Loadout、Usage 和计算型 System Status 投影为三个只读页面；Loadout 顺序和关联由服务端 DTO 决定，Usage 各事实保持独立，System Status 不建表不轮询。N10、N11 为 DONE，N12 保持 NOT_STARTED。
+
+### 21.15 N12 完成记录
+
+- 状态：DONE
+- 完成内容与命令契约：新增 Server 本地命令 `asset:confirm`，一次只接受一组 `--relative-path <inbox/.../*.md>` 与 `--expected-content-hash <64 位小写 SHA-256>`；两个参数均必填且不得重复，不接受 destination、workspace、scope、type、assetId、`--all`、glob、目录或位置参数。构建后调用方式为 `npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/server asset:confirm -- --relative-path 'inbox/workspaces/<workspace>/<type>/<file>.md' --expected-content-hash '<sha256>'`，继续复用绝对路径环境变量 `CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH` 与 `CODEX_MEMORY_OS_WORKSPACES_PATH`，不要求数据库、Git Commit 或 ConfirmationRecord。
+- 路径、资格与正式性：输入只允许规范化的 `inbox/global/{memories,documents,skills}/<file>.md` 或 `inbox/workspaces/<workspace>/{memories,documents,skills}/<file>.md`，拒绝绝对路径、`.`、`..`、空段、反斜杠、NUL、非 Markdown、目录、Symlink、非普通文件和布局外路径；目标只由首段 `inbox/` 机械替换为 `assets/`，调用方不能覆盖。完整 Inbox Scanner 负责严格 Frontmatter、`ast` ID、type/scope/workspace、路径一致性、Workspace 配置和 Inbox 重复 ID；完整正式 Scanner 负责当前 Asset ID 冲突。其他候选的普通资格诊断不阻断当前合法文件，但 Repository、Workspace 配置或任一完整 Snapshot 不可确认时整体 fail closed。正式性仍只由文件位于 `assets/` 表达，命令不生成 ID、不改 Markdown、不直接写 Catalog/FTS/SQLite。
+- 复制、Hash、并发与清理：Scanner 通过后重新以 `O_NOFOLLOW` 读取源文件实际字节并用既有 `computeContentHash` 校验用户 Hash；目标父路径逐段确认是普通目录，只创建合法缺失目录；目标使用 `copyFile(..., COPYFILE_EXCL)` 排他创建。复制后先比较目标实际字节 Hash 与源/期望 Hash，再用正式 Scanner 校验目标；删除源之前重新执行 Inbox Scanner，并再次检查源 Hash 与文件身份。删除后确认源不存在、目标仍是同一普通文件、Hash 不变且正式 Scanner 仍通过。同一路径重复执行安全返回源不存在；两个并发命令最多一个成功。复制或复制后验证失败时保留源并只按文件身份清理本次创建的未完成目标；源删除失败时优先撤销本次目标，撤销不能安全完成时明确要求人工检查，不触碰其他文件。
+- CLI 结果与错误：成功 stdout 只输出 `{ok,assetId,sourceRelativePath,targetRelativePath,contentHash}` JSON，退出码 0；可预期配置、输入、资格、Snapshot、冲突和 Hash 拒绝退出 2，文件复制、复制后校验和源删除等运行失败退出 1。稳定业务码为 `CONFIRM_CONFIGURATION_INVALID`、`CONFIRM_INPUT_INVALID`、`INBOX_ASSET_NOT_FOUND`、`INBOX_ASSET_INVALID`、`INBOX_SNAPSHOT_UNAVAILABLE`、`ASSET_ID_CONFLICT`、`CONTENT_HASH_MISMATCH`、`TARGET_ALREADY_EXISTS`、`ASSET_COPY_FAILED`、`POST_MOVE_VALIDATION_FAILED`、`SOURCE_REMOVE_FAILED`；未知失败只返回安全 `CONFIRM_FAILED`。错误 JSON 不输出 Stack、正文、SQLite/日志/Workspace 配置绝对路径或内部异常对象，只在输入路径已经通过布局校验后返回允许的仓库相对路径。
+- Catalog、Watcher、Search/Read 与只读边界：专项测试将六种 GLOBAL/WORKSPACE × MEMORY/DOCUMENT/SKILL 候选逐个确认，验证字节与 Hash 完全不变、正式 Scanner 通过，再执行既有 Catalog 同步并通过 N05 Search/Read 读取当前 Markdown；N04 Watcher 全量回归继续通过，运行中的 Server 仍按现有 Watcher 重新索引，未运行时命令不启动后台服务且由下次既有同步建立 Catalog。Hub 43/43 回归证明仍无确认、移动、删除或编辑控件；N09 测试和构建 smoke 证明 REST 仍只有七个只读 GET；N08 测试和构建 smoke 证明 MCP 仍只有六个既有工具，没有新增确认或移动工具。
+- 修改文件：`apps/server/src/asset/confirmation.ts`、`apps/server/src/asset/confirm-cli.ts`、`apps/server/src/asset/scanner.ts`、`apps/server/src/asset/index.ts`、`apps/server/test/asset-confirmation.test.ts`、`apps/server/test-support/asset-confirm-build-smoke.mjs`、`apps/server/package.json`、本文。
+- 测试、消融与工作区保护：所有 pnpm 命令均使用 Node.js 22.16.0 + pnpm 11.1.3 固定入口。N12 专项 11/11、Server 79/79、Hub 43/43、IdGenerator 4/4、根 126/126；Server、Hub、根 typecheck/test/build、`pnpm install --frozen-lockfile`、编译后 `asset:confirm`、Vite dev proxy、构建产物 Hub+REST、N09 七路 REST、N08 六工具 MCP smoke 与 `git diff --check` 全部通过。A0 构造用户审阅 A 后同路径替换为 B，证明仅按路径复制的基线会复制 B，而 N12 因 expected Hash 不匹配拒绝且不复制/删除；A1 构造已有正式目标，证明普通复制会覆盖，而 `COPYFILE_EXCL` 路径稳定拒绝并保留两端原字节。全部文件系统验证只使用并清理系统临时目录，没有写正式 Asset Repository、Engineering Memory、Memory-Candidates 或 HumanReview，没有发起 Knowledge Capture Proposal，没有修改 Hub/REST/MCP，也没有 commit、push、覆盖、回滚或清理用户既有改动。
+- 未解决问题与下一任务输入：无 N12 Gate 阻断项；当前只验证目标 macOS 本地文件系统和进程模型，不外推到网络文件系统或其他操作系统。源删除已经完成后若目标又被命令外部并发修改或删除，最终校验会以 `POST_MOVE_VALIDATION_FAILED` 安全退出，但不会自动重建源、建立锁平台或状态机，需按返回的仓库相对路径人工核对。下一任务仅为 N13 既定集成验收、Loadout A0/A1/A2 消融和运行文档，不得改变 N12 的 Human-First 契约或新增浏览器/MCP 写入口。
+- 简短总结：N12 以用户确认的确切 Inbox 路径和确切 SHA-256 为唯一授权边界，用 Scanner、排他复制、前后 Hash 与受限清理完成一个文件的受控正式化；不增加数据库状态、审批记录、批量/自动确认或后台平台。N11、N12 为 DONE，N13 保持 NOT_STARTED。
+
+### 21.16 N13 完成记录
+
+- 状态：DONE。
+- 端到端验收范围：新增源级 N13 集成测试和真实构建产物 smoke；统一临时 fixture 覆盖 GLOBAL/alpha/beta 的 MEMORY、DOCUMENT、SKILL、合法与无关诊断 Inbox、可信 cwd 最长路径、Hook 创建/重试/复用/显式跨 Session attach/no-op 生命周期、显式 Loadout Resolve、六工具 MCP、Search/Read/Recall/Read/Used、七路只读 REST、Hub 静态资源、Host/Origin、N12 CLI、Watcher 增量、配置失效/修复、Asset 修改/失效/修复/删除、Server SIGTERM 停止/重启和 SQLite 删除后从 Markdown 重建。所有文件系统和数据库数据均位于系统临时目录并在成功/失败路径清理。
+- Golden Query：固定并记录 Application 层查询矩阵，覆盖同 Workspace 命中、其他 Workspace 禁止、GLOBAL 跨 Workspace、NULL 只见 GLOBAL、DOCUMENT/SKILL 只进入 ON_DEMAND、空结果不扩域、中文单字/双字 LITERAL、中文三字及以上 FTS、长短词 HYBRID、英文/中文/代码符号混合、默认 AND、FTS 特殊字符字面转义、同分按 Asset ID 确定排序和 Search 后 Read 当前 Markdown；另以真实构建产物 MCP 验证 alpha/GLOBAL/beta/NULL 隔离与当前 Read。
+- A0/A1/A2 定义：A0 仅以可信 Workspace 调用统一 Search，不保存 Loadout、不向 Hook 注入；A1 显式 Resolve 并保存原始 Asset 顺序、mode、reason、title 与 ON_DEMAND hint，测试侧反事实渲染不注入 DIRECT summary；A2 使用生产 `renderLoadoutForHook` 注入 DIRECT MEMORY title+summary，DOCUMENT/SKILL 仍只给读取入口。Workspace、assets/inbox、Asset ID、Content Hash、当前 Markdown Read、Host/Origin 和人工确认均未参与消融。
+- A0/A1/A2 实际结果：三组使用相同 fixture、Task request、Workspace 和 3 个期望 Asset，期望覆盖均为 3、跨 Workspace 泄漏均为 0、Asset 顺序稳定且 mode/reason 符合策略。A0：Loadout 0、Hook 可见 Asset ID 0、唯一决策 token 0、额外 Read 3、Hook 文本 0 字符。A1：Loadout 3、Hook 可见 Asset ID 3、唯一决策 token 0、额外 Read 3、反事实 Hook 文本 622 Unicode 字符，并证明跨 Turn 和显式跨 Session 保持同一选择。A2：Loadout 3、Hook 可见 Asset ID 3、唯一决策 token 1、额外 Read 2、生产 Hook 文本 740 Unicode 字符；DOCUMENT/SKILL 正文 token 均未注入。另验证超大 DIRECT summary 降级为 `DIRECT_BUDGET_DOWNGRADED`，完整文本不超过 3000 字符且 Loadout 不超过 8 项。
+- 消融结论：A1 对 A0 的可验证增量是把同一稳定 Asset 选择和 ON_DEMAND 读取入口保存并带入后续 Turn/显式跨 Session，不再重新猜测 Workspace/Asset；A2 对 A1 的可验证增量是只有 A2 才在 Hook 中直接出现强匹配 MEMORY 的唯一决策 token，并把本 fixture 的额外 Read 数从 3 降为 2。小样本不外推为长期质量结论，不调整 200/300、3000 或 8 项参数，不进入 A3/A4。
+- Search/Read/Usage：MCP 只按 taskId 取得可信 Workspace；alpha 只见 alpha+GLOBAL，beta/NULL 边界正确；只对实际 Search 返回项记录 Recall，成功当前 Markdown Read 记录 Read，Used 显式幂等；失败/空 Search 和无权限 Read 不产生错误 Usage，Asset 删除后历史 Usage 显示 `assetMissing=true`，Catalog 增量/重启不丢 Task/Usage。既有注入故障回归继续证明 Recall/Read Usage 写失败不覆盖主结果。
+- N12、Watcher、Catalog、Search/Read：构建后 `asset:confirm` 以确切 `relativePath + expectedContentHash` 把合法候选无字节变化地移入正式路径，Watcher 自动同步 Catalog/FTS，随后 MCP Search/Read 与 Hub Asset Detail 可见，Hub Inbox 不再显示；重复命令不覆盖目标，错误 Hash 保留候选且不创建目标。修改、失效、修复和删除正式 Asset 均在有界轮询内反映到 Search/Read。
+- SQLite 与重启：SIGTERM 后端口关闭且 Watcher/连接退出；使用同一 SQLite 重启后 Catalog/Search/REST/MCP、Task Loadout 和 Usage 恢复。停止 Server 并删除临时 SQLite/WAL/SHM 后，启动扫描从正式 Markdown 重建 Catalog/FTS；旧 taskId 返回 `TASK_NOT_FOUND`，新 Task 可 Search，旧 Task/Usage 明确不恢复。
+- Hub/REST/MCP 只读边界：源码与构建产物保持恰好七个 REST GET，所有对应 POST/PUT/PATCH/DELETE 返回 405；MCP 保持恰好六个工具且没有 Asset 确认/移动工具；N12 仍仅由本地 CLI 触发。Hub 四视图未出现确认、移动、编辑、删除、Resolve、Attach、Complete、Cancel 或 Usage 修改控件，也不自动轮询、不保存状态历史。
+- M03/M04 合成接入：使用当前 IdGenerator 生成新 ast ID，生成不携带旧 ID/Review/Usage/状态字段的严格 Inbox Asset；候选不进入默认 Search，人工确认模拟后经 Watcher/Catalog 进入 Search/Read，GLOBAL/WORKSPACE 不串库，SQLite 没有 ConfirmationRecord 表。结论仅为“当前系统具备 M03/M04 技术接入条件”；没有读取正式旧知识源、生成真实盘点/审核/生成报告或执行真实迁移，M00～M05 均保持 NOT_STARTED。
+- 运行文档：重写 README，修正“Continuously captures”夸大表述，记录产品边界、固定安装版本、Asset Repository/Workspace/Frontmatter/Hash、全部环境变量、开发/生产启动与 SIGINT/SIGTERM、七路 REST、Hook 输入输出/复用/attach/no-op、六工具 MCP 读写边界与 `required=false`、单文件确认命令/退出码/恢复边界、SQLite 安全重建、排错和已知边界；Codex MCP/Hook 形状按 2026-09-04 当前 OpenAI 官方文档核对，但未修改任何用户配置。
+- 修改文件：`README.md`、`apps/server/package.json`、`apps/server/test/n13-integration.test.ts`、`apps/server/test-support/n13-e2e-build-smoke.mjs`、`设计文档/codex-memory-os-design-revision-2.md`。没有修改生产运行时源码。
+- 测试命令与数量：所有 pnpm 命令均使用 `npx -y -p node@22.16.0 -p pnpm@11.1.3`。`pnpm install --frozen-lockfile` 通过；Server typecheck/test/build 通过，81/81；Hub typecheck/test/build 通过，43/43；IdGenerator 4/4；根 typecheck/test/build 严格串行通过，128/128；N13 专项 2/2。`smoke:n13:e2e:build`、`smoke:asset-confirm:build`、`smoke:proxy:dev`、`smoke:hub:build`、`smoke:rest:build`、`smoke:mcp:build` 全部通过。另把排除 Git/node_modules/dist 的当前源码复制到系统临时目录，按 README 执行 frozen install、build 和 N13 构建产物闭环通过；带 `pnpm --dir` 的 Hook 文档命令也以临时配置实跑通过。
+- 浏览器检查：真实构建 Hub 在 1280×720 与 390×844 下检查 Assets/Inbox、Task Loadouts、Usage、System Status 四视图；DOM 与截图均显示导航、筛选、详情和只读状态正常，全部视图 `scrollWidth <= viewportWidth`，无横向溢出，浏览器控制台 warning/error 为 0。
+- 工作区保护：只使用并清理系统临时 Asset Repository、workspaces.json、SQLite/WAL/SHM、日志和浏览器 fixture；未写正式 Asset Repository、Engineering Memory、Memory-Candidates 或 HumanReview，未读取/迁移/修改/删除旧知识源，未修改用户全局 Codex/MCP/Hook 配置，未执行 Git add/commit/push，未覆盖、回滚或清理用户已有改动。`git diff --check`、新增文件尾随空白、临时目录和 N13 Server/Vite/Watcher/MCP Client 进程残留检查通过。
+- 未解决问题与验证边界：无 N13/MVP Gate 阻断项。当前只验证目标 macOS ARM、本地文件系统和确定性临时 fixture；网络文件系统、其他操作系统、正式长期数据和真实旧知识质量仍未验证。N00 的真实 Codex CLI/Desktop 传输兼容性属于前序证据，本轮按约束未启动额外 Codex Agent，只用当前 SDK Client 重新验证构建产物 MCP 业务。N12 的命令外部目标破坏边界保持不变。
+- MVP Gate：N12=`DONE`，N13=`DONE`，M00～M05=`NOT_STARTED`，CodexMemoryOS MVP=`DONE`。
+- 简短总结：N13 用同一临时系统把 Hook→Task→显式 Loadout→MCP→Usage、Inbox→人工确认→Watcher→Catalog→Search/Read、Hub/REST 只读投影和重启/重建串成可重复验收；A1/A2 均证明了具体增量收益，运行文档可复制执行，MVP 技术 Gate 关闭且未开始任何旧知识正式整理。
+
+---
+
+## 22. MVP 完成标准
+
+全部满足才算 MVP 完成：
+
+1. Node 22.16.0 本地服务稳定运行；
+2. MEMORY、DOCUMENT、SKILL 三种 Asset 可被扫描；
+3. GLOBAL / WORKSPACE 隔离正确；
+4. Markdown + Git 为正式知识来源；
+5. SQLite Catalog 可删除重建；
+6. HTTP MCP 可用，或 STDIO 降级适配器可用；
+7. Codex 能执行 Asset Search/Read；
+8. 逻辑 Task 可跨 Turn，并通过 `task_turn_binding` 跨 Session 显式续接；
+9. Task Loadout 使用固定字段 + 精简 loadout_json；
+10. Usage 保留独立 usage_id，并独立记录 Recall/Read/Used；
+11. Hub 能只读查看 Asset、Markdown、Loadout、Usage 和系统状态；
+12. Codex 不能直接把候选写入正式 Asset；
+13. 注入内容有明确字符上限；
+14. 旧系统整理可以生成符合契约的 Inbox Asset；
+15. 不依赖模型 API、MemoryProxy、Obsidian 或团队服务。
+
+---
+
+## 23. 后续能力
+
+真实使用证明有必要后再评估：
+
+- Hub 编辑和确认；
+- Scenario Profile；
+- 手工 Required Assets；
+- 自动场景识别；
+- 更复杂的 Task 生命周期；
+- Usage 趋势和优化建议；
+- Skill 发布到 Codex；
+- ConversationHistory；
+- Document 附件和目录 Asset；
+- 中文分词增强或向量检索；
+- Tag、关系图和知识图谱；
+
+以上后续项不改变本项目“个人、本地、Codex 专用”的产品边界。目录 Asset 如未来确有需求，必须另行设计文件契约与 Hash 算法。
+
+---
+
+## 24. 最终原则
+
+> 系统保存的是现在仍然有用的知识，而不是知识系统自己的历史包袱。Codex 负责查找和整理，人负责判断；Markdown 负责承载内容，Git 负责历史，SQLite 负责查询，Task Loadout 负责当前任务，Usage 只记录 Recall、Read、Used。

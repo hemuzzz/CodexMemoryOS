@@ -1,0 +1,244 @@
+# N00–N13 完成后的独立代码审计
+
+- 审计日期：2026-09-05，Asia/Shanghai。
+- 结论：**NO-GO（面向真实候选知识接入、长期 Hook 注入和正常本地运行）**。
+- 原因：确认了未确认候选触发进程内代码执行、当前文件资格绕过、跨 Workspace 摘要注入及正常文件替换导致全局索引不可用。现有测试全绿不能覆盖这些反例。
+- 对纯隔离 fixture 的既有工程通路：可继续测试；不表示批准部署、迁移或修改阶段状态。
+- 执行方式：单个主 Agent 串行审查，无子 Agent、无委派。测试脚本自身启动的 HTTP/Hook 子进程和并发客户端只用于隔离测试。
+- 本轮没有修复源码、测试、配置、依赖或设计；没有修改个人 Codex/MCP/Hook 配置，没有执行真实知识确认、迁移或数据清理。
+
+## 1. 当前基线与证据边界
+
+| 项目 | 本轮核验 |
+|---|---|
+| Repository | `/Users/hemu/Desktop/github/CodexMemoryOS` |
+| Branch / HEAD | `main` / `7f359aa8b41ca97817d1d9d86938d784c380893f` |
+| 初始状态 | `git status --short`、`git diff --stat` 均为空；没有未提交或非忽略未跟踪代码 |
+| 规则 | 读取当前 `/Users/hemu/.codex/AGENTS.md`；未发现仓库/子目录 AGENTS 或 override；没有 `.codegraph/` |
+| 主设计 | `设计文档/codex-memory-os-design-revision-2.md`，内部为 **Revision 2.1** |
+| 后续契约 | 主设计 15.6、16.1、21 节及 N06/N07/N08/N12/N13 完成补充；状态 DONE 仅为审计起点 |
+| 环境 | macOS 26.6.2 (25G83)，darwin/arm64；默认 Node v25.9.0 |
+| 实际检查环境 | 已有 npm 缓存内 Node **v22.16.0**；pnpm **11.1.3**；未重新安装或替换依赖 |
+| 锁定依赖 | `pnpm-lock.yaml`：SDK 1.30.0、better-sqlite3 12.11.1、gray-matter 4.0.3、chokidar 5.0.0、snowflake.io 4.1.2；N00 独立 package-lock 的 SDK 同为 1.30.0，Zod 版本不同 |
+| SQLite | 本轮原生探针得到 3.53.2；FTS5/trigram/contentless-delete、删除、重插入、回滚实际通过 |
+| 实际范围 | 当前源文件及构建产物，不限于最后一次 diff；按模块读取入口、调用链、关联存储和关键测试。不是每个分支的形式化正确性证明 |
+
+没有把旧 V4、Revision 1、历史审查的缺陷或 UNKNOWN 当成本轮结论。轻量历史检索未用于生成 Finding；全部 Finding 在当前源码/契约或本轮隔离执行中重新取证。M00–M05 不在本轮执行范围。
+
+## 2. 已确认 Finding
+
+### F01 — P0：只读 Inbox 扫描可以执行候选 Frontmatter 中的 JavaScript
+
+**影响：N03/N05/N09/N11/N12；候选与只读边界、整个本地服务进程权限。**
+
+- 当前源码：`apps/server/src/asset/scanner.ts:532–555`，尤其 `543` 的 `matter(source)`；`apps/server/src/asset/inbox.ts:53–56`；`apps/server/src/http/router.ts:109–111`。System Status 和确认命令也调用相同 Scanner。
+- 锁定依赖证据：`node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js` 的 `parseMatter` 接受开头 delimiter 后的语言；`lib/engines.js` 的 `engines.javascript.parse` 调用 `eval`。已直接阅读安装版本，不是依赖名称推测。
+- 预期：YAML Frontmatter 是数据；浏览 `inbox/` 不执行候选代码，不需要先信任候选。主设计 Human-First、8.2、18.1 和用户本轮只读边界均要求这一点。
+- 输入/序列：在**隔离** `inbox/global/memories/js.md` 放入 `---javascript`，表达式先用 `require('node:fs').writeFileSync` 向同一隔离目录写无害 marker，再返回具有合法 id/type/scope/title/summary 的对象。启动当前构建 Server，仅请求 `GET /api/inbox`，没有调用确认命令。
+- 实际：HTTP **200**，marker 内容 **`REST executed`**，该文件同时作为合法候选返回（`candidateAccepted:true`）。单独 Scanner 复现也是 accepted=1、diagnostics=[]。
+- 完整失败链：只读 GET → InboxApplicationService → Scanner → 自动选择 JavaScript parser → **执行发生在 Zod 校验之前** → 返回合法对象通过校验。候选内容足以执行 Node 进程代码，不要求操作者事先拥有完整本机执行权限。
+- 反证：普通路径限制、Hash、Zod strict、关闭 Markdown HTML、Host/Origin 都不能拦截已被授权浏览的本地候选触发解析器执行；它们作用的边界/时间不同。没有测试删除真实文件、窃取凭据或实际晋升，严重性依据是已经验证的任意 JS 执行能力。
+- 最小修复方向：在解析前只接受冻结的 YAML delimiter/格式，明确禁止可执行 parser/语言切换；不要仅设置一个会被文件语言覆盖的默认 `language`。复用现有依赖即可评估，无需升级或新审批平台。
+- 回归：正式扫描、Inbox GET、System Status、确认预校验均使用含非 YAML header 的样本，断言拒绝且 marker 不存在；合法 YAML/中文/实际字节 Hash 保持不变。
+
+### F02 — P1：精确文件复核只检查末级文件，父目录 Symlink 可读到 Repository 外部
+
+**影响：N03/N05/N07；Search、Read、Mark Used 和 Hub 当前资格复核。**
+
+- 当前源码：`apps/server/src/asset/scanner.ts:254–280` 只拼接路径并 lstat 末级文件；`489` 的 `O_NOFOLLOW` 也只保护末级；`apps/server/src/asset/search.ts:247–268` 据此返回 Markdown。
+- 契约：主设计 11.5（`841` 附近）要求复用路径/Symlink 规则，18.1 明确禁止读取仓库外文件。
+- 触发：先正常索引 `assets/global/memories/one.md`；把 `memories/` 移到 Repository 外的隔离 sibling 目录，再用同名 Symlink 指向它。在旧 Catalog 尚未被 watcher 更新的窗口调用精确 Read。文件自身、ID、字节与 Hash 均不变。
+- 本轮结果：全量 Scanner 返回 **0** 个 Asset、`SYMLINK` 诊断；同一当前文件的 Application Read 却返回正文（`readReturned:true`）。复现使用真实文件系统与正式服务类，只用手动 synchronize 固定旧 Catalog 窗口，不修改资格实现。
+- 反证：调用方没有提交任意路径，Catalog 路径仍为合法相对路径；但词法路径合法不等于祖先目录安全。末级 `isSymbolicLink()`/`O_NOFOLLOW` 无法保护祖先；Hash 完全相同也不会触发 stale 刷新。Watcher 最终可能清除旧记录，不能作为当前 Read 的资格检查。
+- 最小修复方向：定向扫描验证 Repository 根及每个父目录、最终实际路径边界，复用 Scanner 资格逻辑；不引入文件访问平台。
+- 回归：根/中间目录/末级 Symlink 分别替换，Search/Read/Used 都拒绝；保留普通文件修改、删除与合法移动测试。
+
+### F03 — P1：Loadout 后续注入绕过可信 Workspace，泄露迁移后的其他 Workspace 摘要
+
+**影响：N06/N08 Hook 注入；即使 Catalog 已完全刷新也发生。**
+
+- 当前源码：`apps/server/src/loadout/service.ts:264–273` 只按冻结 ID 取 metadata；`apps/server/src/loadout/projection-repository.ts:18–31` SQL 没有 scope/workspace；`apps/server/src/loadout/renderer.ts:32–37` 直接注入 title/summary；Hook 调用 `renderStoredTaskLoadout`。
+- 契约：Task.workspace 是可信访问上下文；主设计 12.4 的装配不扩大 Workspace，14.3 注入是同一 Task 的上下文。冻结的是 Loadout JSON/顺序，不是对未来不同 Workspace 内容永久授权。
+- 序列：alpha Task 显式 Resolve，选中 alpha MEMORY `ast103` 为 DIRECT；移除该文件，在 beta 下保存同 ID 的合规文件并把摘要改为 `BETA_PRIVATE_MARKER`；完整刷新 Catalog 后读取原 alpha Task 的已保存 Loadout。
+- 本轮结果：同 Asset 的普通 Read 返回 **`ASSET_NOT_ACCESSIBLE`**；原 Task 的 Hook Renderer 输出却包含 **`BETA_PRIVATE_MARKER`**。没有依赖 watcher 延迟或错误配置。
+- 反证：初次 Resolve 的 N05 Search 确实隔离；后续 `findMetadata` 未调用该资格判断。Task.workspace 在输出 header 中出现不等于 SQL 过滤；跨 Session attach 的 Workspace 校验保护的是 Task，而非当前 metadata。
+- 最小修复方向：在注入投影时按可信 Task.workspace 过滤当前 Asset，失效/不可访问项不提供摘要；维持保存的 JSON、顺序及终态冻结，不新增 Revision 或正文副本。
+- 回归：同 ID 的 GLOBAL→其他 WORKSPACE、alpha→beta、类型变化与删除；分别验证新 Turn Hook、显式 attach，普通 Read 与注入资格一致。
+
+### F04 — P1：删除 A 后把 B 移到 A 原路径，增量差异重复插入 B，使整个索引持续 DEGRADED
+
+**影响：N04 与所有要求 READY 的 MCP Search/Read/Used、Hub Asset API。**
+
+- 当前源码：`apps/server/src/asset/catalog.ts:369–379` 的 `sameIdAsset ?? assetsByPath.get(row.filePath)` 把两个旧行都映射到同一新 Asset；`consumedAssetIds` 只影响 added，未去重 changed。`apps/server/src/asset/index-manager.ts:220–247` 捕获事务错误后降级。
+- 契约：主设计 17.2 要求合法改名/同路径更换 ID 的完整 Snapshot 被正确增量应用。
+- 输入：旧 Snapshot：`a.md=ast301`，`b.md=ast302`；删除 a.md，把 b.md rename 为 a.md，下一完整 Snapshot 只有合法 `ast302`，不存在重复 ID。
+- 本轮复现：`synchronize()` 返回 null，`INDEX_UPDATE_FAILED: UNIQUE constraint failed: asset_catalog.file_path`，Catalog/FTS 仍为 2 行，`indexState=DEGRADED`；再次 synchronize 仍 DEGRADED。`rebuild()` 后 READY、1 行。
+- 失败链：旧 A 通过路径匹配 B → changed=[B]；旧 B 通过 ID 匹配 B → changed=[B,B] → 两次 INSERT 相同 path → 事务回滚 → READY gate 拒绝查询。只需两次普通本地文件操作落在同一防抖批次，不需要集群或恶意输入。
+- 反证：Scanner 完整且正确；数据库唯一约束和事务有效阻止错误写入，却不能修正差异集合；重试不改变输入所以不会恢复。已有 moved/replaced 测试单独覆盖各动作，未覆盖此组合。
+- 最小修复方向：以新 Snapshot 的唯一 ID 生成一次写入集合，分开旧行删除与新行写入；保留现有事务和约束。
+- 回归：删除目标后移动已有 ID 到旧目标路径、两文件互换路径、路径重用/ID 重用组合；断言一次同步 READY、Catalog/FTS 一一对应、Task/Usage 不变。
+
+### F05 — P1：Hook 把普通运行故障统一返回退出码 2，按 Codex 协议会阻断用户 Prompt
+
+**影响：N06/N08 普通 Codex 工作可用性。存在明确文档冲突，不能以历史 PASS 消除。**
+
+- 当前源码：`apps/server/src/hook/user-prompt-submit.ts:169–185`，所有错误都返回 2；TaskRepository 默认 busy_timeout=5000，同步初始化数据库，无独立的非阻断故障映射。
+- 本轮命令复现：使用 dist Hook 子进程、正常 `UserPromptSubmit` JSON、隔离数据库路径、一个不存在的隔离 workspaces.json。结果 **exitCode=2、stdout 为空、74ms 返回**，stderr 为 `WORKSPACE_CONFIG_INVALID`。这证明返回速度快，但不证明安全降级。
+- 协议依据：本轮读取的 [OpenAI Hooks / UserPromptSubmit](https://learn.chatgpt.com/docs/hooks) 明确说明退出码 2 加 stderr 是阻断 Prompt 的方式。实际 CLI/Desktop 生命周期未运行；“阻断”是当前公开协议与已复现退出码的合成结论，不冒称观察过 Desktop 被阻断。
+- 契约：本轮用户要求检查不阻断普通工作；主设计 18.2（1328–1333 附近）要求知识服务故障不阻断 Codex。另一方面 N06 完成补充 `1614` 确实写了失败 exit 2，属于与上层降级目标冲突的历史实现契约，报告保留该冲突。
+- 反证：MCP `required=false` 仅控制 MCP 初始化，不能覆盖命令 Hook 返回码；没有 JSON `decision:block` 也不代表不阻断。这里没有声称“只停止 HTTP”一定报错，因为 Hook 实际直连 DB；复现前提是本地知识运行依赖不可用。
+- 最小修复方向：先统一降级契约，对配置/数据库/投影等可选知识依赖故障返回非阻断结果，输出极短诊断；不把 Task/Workspace 校验失败转成跨域回退或伪造 Task。明确需要阻断的业务输入与运行故障分开。
+- 回归：缺配置、SQLite busy、不可读目录、Loadout 渲染超预算；验证退出码与客户端事件语义，而不是只断言“进程退出 2”。真实客户端校验仍需单独完成。
+
+### F06 — P2：启动扫描与 watcher ready 之间存在永久漏事件窗口
+
+**影响：N04 启动期间新建/修改 Asset 的可见性及状态准确性。**
+
+- 当前源码：`apps/server/src/asset/index-manager.ts:105–107` 先 synchronize 后启动 watcher；`253–264` 两个 watcher 均 ignoreInitial=true；ready 后没有补偿扫描。
+- 触发/本轮证据：使用现成 scanner 注入点包装真实 `scanAssetRepository`，在首轮完整 Snapshot 已生成后、返回前写入隔离 `gap.md`；其余均运行正式 IndexManager/watcher。`start()` 后等 350ms，扫描次数仍 **1**、状态 **READY**、检索 **0**；显式 synchronize 后检索 **1**。
+- 这是确定性时序控制复现，不是自然时序概率/压力测量。它准确落在已有 Snapshot 与 watcher 注册之间的可达窗口，没有替换 Scanner 结果或修改业务代码。
+- 反证：防抖/串行队列只覆盖收到的事件；ignoreInitial 不报告已有文件；空候选 Search 无法发现 Catalog 中从未出现的新增文件，因此没有自行触发刷新。下一次无关文件事件可能恢复，但未发生时可持续漏召回。
+- 最小修复方向：watcher ready 后作一次完整对账，或先建立监听再完成启动扫描；沿用现有队列，不增加事件账本/轮询平台。
+- 回归：在启动窗口分别新增、删除、改 Workspace 配置；ready 后无需额外用户写操作即可与当前文件一致。
+
+### F07 — P2：缺少已约定的保留 Task/Usage 的索引重建入口，运行说明只提供整库重置
+
+**影响：N04/N13 维护恢复与用户历史运行数据。**
+
+- 契约：主设计 `1299–1308` 明确提供 `codex-memory index rebuild`，仅重建 Catalog/FTS，不影响 Task/Usage。
+- 源码/入口证据：`apps/server/src/asset/index-manager.ts:115–117`、`asset/catalog.ts:137–155` 已有安全 rebuild 方法；全部 package.json、main.ts、confirm-cli.ts、Hook 与六个 MCP 工具中没有对应用户命令/入口。REST 只读，因此也不存在浏览器重建接口。
+- 实际运行文档：`README.md:282–304` 将 REBUILD_REQUIRED 指向“安全重建 SQLite”，操作移走整库，并明确告知 Task/Usage 丢失。它是显式整库恢复说明，不是安全的索引重建能力。
+- 验证：独立链路对 rebuild() 实测 Task/Usage 保留；N13 build smoke 的整库删除实测 Task/Usage 消失，二者已经区分。缺失命令为静态入口审查结论，没有去执行可能属于其他软件的同名命令。
+- 反证：底层方法可用不等于交付了运行入口；README 的丢失提示使这不是“静默删除”，因此定为 P2，不抬升为 P0。
+- 最小修复方向：提供薄的显式本地重建命令，调用现有 rebuild；将“仅索引重建”与“整库丢失恢复”分别说明。无需新增 Hub 写接口、重建历史表或迁移平台。
+- 回归：通过构建后的实际命令处理损坏 FTS/Schema，前后 Task/Usage/binding 完整一致；失败 Snapshot 不更改任何表。
+
+## 3. 待验证风险与契约待确认（不是额外已确认 Bug）
+
+| 编号 | 内容与当前证据 | 缺口/处理边界 |
+|---|---|---|
+| U01 | 正式 N07/N08 的真实 Codex CLI/Desktop 安装、Hook 生命周期及多窗口兼容性 UNKNOWN | 本轮 SDK initialize/list/call、同客户端重连、并发、dist smoke 通过；N00 历史 Desktop PASS 仅是历史。未注册用户配置、未启动额外 Codex Agent；不得从相同 SDK 直接推导当前 Desktop 成功。可选 STDIO Adapter 未实现不构成缺陷 |
+| U02 | 显式 Task 结束只在 ApplicationService 暴露 | `task/service.ts:85` 有 updateStatus，事务与终态回归通过；没有终态 CLI/MCP/Hub 入口，README 未教用户如何结束。后续六工具契约与早期“最小状态更新能力”粒度未完全一致，先明确是否需要交付薄本地入口，不自动新增 MCP 工具 |
+| U03 | 多进程 ID 唯一性的证据仍有限 | 包装器固定 node id=0、第三方 sequence 是进程内；已有 20,000 测试是单进程 Promise 调用。本轮 4 个真实进程共 600 次不同 Session Task 创建、真实时钟和 SQLite 事务下 **0 失败**，不能报告已经碰撞，也不能证明同毫秒全部交错安全。跨重启时钟水位已被 N02 补充明确排除，不恢复分布式 ID 平台 |
+| U04 | Hook 后续摘要增长超过 3000 时直接抛错；估算来自 Resolve 时点 | Renderer 确实按当前完整文本检查，不会偷偷超预算；旧 JSON 不自动改变。预算变化如何降级与 F05 一并明确，不要求冻结正文或新增版本对象 |
+| U05 | 桌面/390px 实际视觉与浏览器端操作本轮未重做 | 43 个 Hub 组件/API 测试、真实静态服务和代理已执行；没有把 happy-dom 或历史截图写成当前真实浏览器通过 |
+| U06 | 巨大 Repository、网络盘、其他 OS/CPU、恶意全权限本机操作者未验证 | 当前目标是单机 macOS ARM；没有扩展 ACL、认证平台、分布式锁或迁移工程 |
+
+F05 的 N06 退出码记录与非阻断目标冲突已在 Finding 中显式呈现；任何修复必须统一该语义，本轮不改冻结文件。
+
+## 4. N00–N13 覆盖矩阵
+
+“已检查”表示下列当前入口/连接和证据经过检查，不表示该阶段全部 PASS。
+
+| 阶段/目标 | 实现入口与已读范围 | 本轮测试证据 | 审查状态 |
+|---|---|---|---|
+| N00 HTTP 兼容 Spike | `spikes/n00-http-mcp-ping/src/server.ts`、协议测试/RESULTS、独立 package-lock；与正式 transport 比较 | 独立 6/6；正式 SDK 生命周期/并发测试 | 传输已检查；真实 CLI/Desktop UNKNOWN |
+| N01 工程与启动 | 根/Server/Hub package.json、锁文件、`main.ts → runtime.ts → app.ts`，配置、资源关闭与监听装配 | typecheck/build、health、dist MCP/REST/Hub smoke；源码 tsx 测试 | 已检查；开发 watch 热重载未独立实跑 |
+| N02 ID | `packages/id-generator/src/index.ts`、实际 snowflake.io，Task/Usage 调用与存储 | 4/4；JSON 字符串、20,000 同进程、回退；额外真实多进程 600 次 | 已检查；U03 |
+| N03 Schema/Scanner/Hash | `asset/schema.ts`、scanner 完整/定向/Inbox 路径、实际 gray-matter parser | scanner、confirmation、独立 F01/F02 样本 | 已检查；F01/F02 阻断 |
+| N04 Catalog/FTS/watcher | `asset/catalog.ts`、`index-manager.ts`、一致性/事务/完整快照 gate | asset-index 全部、SQLite probe、独立变更/重复/删除/rebuild、F04/F06 | 已检查；F04/F06/F07 |
+| N05 Search/Read | `asset/search.ts` 全链路，FTS/LITERAL/HYBRID、当前文件、排序/片段/limit | asset-search、N13 Golden、MCP、独立精确读 | 已检查；F02；未做大规模性能结论 |
+| N06 Task/Binding/Hook | `task/{service,repository,model,workspace-resolver}.ts`、Hook CLI；事务、自然复合主键、状态更新 | task/hook tests、真实 CLI 故障、独立多 Turn/attach/终态 | 已检查；F05、U02/U03 |
+| N07 正式 HTTP MCP | `mcp/{http,tools}.ts`、runtime、安装 SDK stateless 实现 | MCP 套件、真实 dist、独立 SDK→当前文件/Usage | 已检查；上游 F01/F02；U01 |
+| N08 Loadout/Usage | loadout policy/service/renderer/projection、usage service/repository、MCP 唯一写入责任 | loadout/usage/logging/MCP；独立 [1,1,true]、稳定 usageId、Asset missing | 已检查；F03/F05 |
+| N09 REST/安全 | `http/{router,contracts/index,service}.ts`、Inbox、错误包络/Host/Origin | rest tests、dist smoke、独立只读 GET marker 与 Usage 不变 | 已检查；F01；没有误判 Hub 全库浏览为越权 |
+| N10 Asset Hub | `App.vue`、api client/types、静态装配、Vite proxy、交互测试 | Hub 组件/API 用例、Hub build/真实 proxy | 已检查逻辑与接线；真实视觉 UNKNOWN |
+| N11 Task/Usage/Status Hub | 三个 views、helper、DTO、AbortController/序号、缺失关联、终态 JSON | 对应 Hub view 用例；REST/独立 Usage missing | 已检查逻辑与接线；真实视觉 UNKNOWN |
+| N12 单文件确认 | `confirmation.ts`、`confirm-cli.ts`、Scanner、COPYFILE_EXCL/Hash/inode/清理 | 11 个专门测试、build smoke、独立错误 Hash/指定样本确认/retry | 常规失败路径已检查；共享 Scanner 受 F01 影响；未实际确认真实知识 |
+| N13 集成/消融/文档 | n13 integration、build smoke、README、阶段补充；采样断言真实性 | 2 个 N13 tests、六个 smoke、额外四链路与反例 | 已检查；F07、效果未验证；M00–M05 不适用 |
+
+特别核验的反证：Search 的外部 Workspace/path 输入被拒绝；未知 cwd 只 GLOBAL；路径匹配使用 relative 路径段边界；同 Turn binding 优先是现行契约，不因重试携带不同字段就另绑；Stop/Interrupt/SessionEnd 不写终态；只有 RUNNING 能改 Loadout；RECALL/READ 只有 MCP 成功业务路径负责，Resolve 内部 Search 不计 Recall；USED 幂等且不增加 Read；Usage 外键只指 Task，不指 Catalog；旧 Usage LEFT JOIN 显示 missing；REST 不增 Usage；Markdown HTML 关闭、危险协议由实际 renderer 的既有测试覆盖。上述有效边界不列作可删除防御。
+
+## 5. 四条跨阶段链路
+
+| 链路 | 本轮实际路径与结果 | 限制 |
+|---|---|---|
+| 1 正式 Markdown→Scanner→Catalog/FTS→MCP Search→Read→Used→Hub | 独立 `chains.mjs` 使用 dist Runtime 和真实 HTTP SDK，检索/正文一致；Recall=1、Read=1、Used=true；重复 Used 的 usage_id 稳定；再浏览 Asset Detail 后 Usage 完整不变 | Hub 展示验证到 REST DTO，渲染由组件测试覆盖；F01/F02/F03 为额外反例 |
+| 2 Hook→Binding→Loadout→多 Turn/跨 Session→显式终态 | 正式 handleCodexHook 创建/复用，MCP Resolve，跨 Session 显式 taskId，ApplicationService 完成，MCP Get 返回 COMPLETED、Resolve 被拒绝 | 终态通过现有 Application API，不冒称存在用户命令；真实 Codex Hook 生命周期 UNKNOWN |
+| 3 有效→改/删/无效/重复→刷新→资格失效→历史 Usage→重建 | 本轮独立重复 ID 全排除、解除恢复、无效化/删除后不可 Read；Usage 保留 missing；仅 rebuild 保留所有 Usage。已有 dist N13 smoke 另验证文件修改与重启、整库丢失后历史确实消失 | 组合移动反例 F04、启动漏事件 F06 未被常规 PASS 掩盖 |
+| 4 Inbox→拒绝→明确选择样本确认→正式查询 | 错 Hash 拒绝且目标不存在；精确路径+实际字节 Hash 确认隔离样本，索引后 MCP 可查询；既有测试验证缺参数、非法路径、目标冲突、重复确认、copy/unlink 失败 | 这是用户授权的隔离测试，不代表 AI 能自行代表真实用户确认；未模拟或写旧审批账本。只读候选 JS 执行见 F01 |
+
+## 6. 实际命令、结果与执行限制
+
+所有运行命令先设置：
+
+```sh
+export PATH='/Users/hemu/.npm/_npx/78120b5db7e8f750/node_modules/node/bin':"$PATH"
+```
+
+本轮日志和复现脚本保存在以下隔离目录，临时 fixture/数据库由脚本关闭后清理；该目录不是长期证据存储，关键结果已写入本报告：
+
+`/var/folders/3k/g7_mt00n1rdfxx__dj6vnnk00000gn/T/codex-n00-n13-audit-13ynisqx`
+
+| 命令 | 实际结果 |
+|---|---|
+| `git branch --show-current; git rev-parse HEAD; git status --short; git diff --stat` | main、上述 HEAD、干净；只读命令 |
+| `pnpm test` | 128/128：Server 81、Hub 43、ID 4；0 failed、Server/ID 0 skipped；日志 `test.log` |
+| `pnpm typecheck` | exit 0；`typecheck.log` |
+| `pnpm build` | exit 0；`build.log`；仅允许的 dist 输出 |
+| `pnpm --filter @codex-memory-os/server smoke:mcp:build` | exit 0 |
+| `pnpm --filter @codex-memory-os/server smoke:rest:build` | exit 0 |
+| `pnpm --filter @codex-memory-os/server smoke:hub:build` | exit 0 |
+| `pnpm --filter @codex-memory-os/server smoke:asset-confirm:build` | exit 0，隔离样本 |
+| `pnpm --filter @codex-memory-os/server smoke:n13:e2e:build` | exit 0，含重启及仅临时整库删除 |
+| `pnpm --filter @codex-memory-os/hub smoke:proxy:dev` | exit 0；真实 Vite proxy；未运行浏览器 |
+| `npm --prefix spikes/n00-http-mcp-ping test` | exit 0，6/6，0 skipped；`n00-test.log` |
+| `node apps/server/test-support/better-sqlite3-capability-probe.cjs <上述隔离目录>/probe.sqlite` | exit 0；3.53.2、原生加载/打开关闭/FTS5/trigram/contentless-delete/delete/reinsert/rollback；`sqlite-probe.log` |
+| `node <隔离目录>/repro.mjs` | exit 0；输出 F01/F02/F03/F05/F06 的实际反例，非修复后 PASS；`repro.log` |
+| `node <隔离目录>/chains.mjs` | exit 0；四条普通链路及真实 GET JS marker；`chains.log` |
+| `node <隔离目录>/rename-repro.mjs` | exit 0；输出 F04 的持续 DEGRADED 与 rebuild 对照；`rename-repro.log` |
+| `node <隔离目录>/id-processes.mjs` | exit 0；4 个进程、600 次不同 Task 创建、实际时钟，0 failures；只证明本次样本 |
+| dist Hook 缺失 config 的隔离 Python subprocess | code 2、74ms、空 stdout；`hook-offline.log` |
+| `git diff --check` | 通过；报告另做尾随空白检查 |
+
+说明：根 `pnpm test` 按仓库既有脚本运行，包内部/测试脚本可能并发；没有并行委派审计，也没有同时运行 build 与 test。运行前检查测试使用 mkdtemp/:memory:、spawn 环境和 cleanup 路径；所有额外脚本仅写自己的隔离目录。未执行 install/frozen-lock 安装、依赖升级、真实数据修复、实际 Codex 客户端调用、全量屏幕视觉检查，未将这些标记 PASS。
+
+初期只读定位遇到两次 zsh 空 glob 和不存在 docs/scripts 目录的提示，已用实际文件清单/路径核验；不是业务测试失败。所有反例脚本保留当前源码不变；脚本 exit 0 只表示完成了证据采集，不表示发现的问题已经修复。
+
+## 7. N13 消融证据应如何解释
+
+本轮实际 N13_ABLATION 输出：
+
+| Variant | 选中/覆盖样本 | Hook 字符 | Hook 可见 decision token | needsAssetRead 字段 |
+|---|---:|---:|---:|---:|
+| A0 | 3 | 0 | 0 | 3 |
+| A1 | 3 | 622 | 0 | 3 |
+| A2 | 3 | 740 | 1 | 2 |
+
+- 输入来自同一个确定性 fixture 和同一初始查询；A1 保存顺序，A2 用正式 Renderer 注入 DIRECT summary，这些工程行为已验证。
+- `apps/server/test/n13-integration.test.ts:352–355` 直接传入 needsAssetRead 的 3/3/2；`688–710` 的 metrics 函数把 workspaceLeakage=0、modeReasonsValid=true 写为常量。另有独立断言验证样本隔离/类型策略，所以不能把常量指标当成所有安全断言失效，但也不能把这些字段当真实运行测量。
+- A0 本身 search items 已带 summary；实验仅证明 summary 是否出现在 Hook 文本，不证明任务答案、召回质量、节省 token 或减少实际 asset_read 调用。
+- “A2 真实知识使用效果提升”**未验证**。不推断 N13 状态需要回退，不增加 A3/A4；后续如评估效果，应使用相同任务、明确评价标准和真实行为记录。
+
+## 8. 独立简化候选（本轮不删除）
+
+| 候选 | 当前防止的失败/收益 | 其他覆盖与删除影响 | 建议 |
+|---|---|---|---|
+| S01 gray-matter 隐式全局正文 cache | 无显式产品需求；可能省解析时间，但没有本轮性能收益证据。`matter(source)` 无 options 使依赖以全文为 key 缓存解析对象，包含旧正文 | 每次先读文件/Hash、SQLite Catalog/FTS 已承担正式投影；Scanner/search 没有清理依赖 cache。主设计说不保留跨请求正文缓存。关闭 cache 不应破坏冻结能力，但本轮未改依赖或执行关闭后反事实测试 | 在 F01 parser 修复时同时明确 cache 选项；避免悄悄长期保留每次编辑的正文版本，不建设新缓存 |
+| S02 N07/N08 阶段命名的兼容 type aliases 与重复 policy 导出 | `mcp/tools.ts:91–92` 的 N07 aliases、policy.ts:22–23 的 aliases 当前只有 barrel 导出，未找到运行消费者 | 本地消费使用当前类型/DEFAULT_LOADOUT_POLICY；只影响未确认的外部 import，不影响 wire DTO。未证明外部依赖不存在 | 作为后续低优先级清理候选；不借审查删公共导出或重构整包 |
+| S03 每个 status 调用完整 Catalog/FTS count 与 rowid 对账 | 可发现运行中损坏，是实际收益；MCP 每次 gate 调用 status，会重复执行全表一致性检查 | 写事务已维护一致性，但不能覆盖外部 DB 损坏；移除全部检查会削弱现有 corrupt-index 测试目标。当前没有大库性能数据 | 只评估检查时机是否可合并，不建议无证据取消一致性检查或添加缓存状态 |
+| S04 每次 Hook 新建 Repository 时重复校验固定表结构/FK | 防止 Hook 写错误数据库或坏 schema，确有边界价值 | 服务启动检查不能兜底独立 Hook 进程；删除会破坏坏 schema 的 fail-closed 目标 | 暂不简化；如解决 U03 时改变进程边界，再重新评估，不为“少层”直接删除 |
+
+继续保留 Hash、Workspace 校验、自然复合键、BEGIN IMMEDIATE、Catalog/FTS 事务、COPYFILE_EXCL、精确确认路径、只读 REST 和固定 Loadout 预算。没有发现需要恢复 Revision/Publication/确认账本/旧 Usage 迁移/向量/Agent 编排的理由。
+
+## 9. 最小修复顺序
+
+1. F01：禁止候选 Frontmatter 执行；先保证只读扫描真的是只读。
+2. F02/F03：当前文件路径和 Hook Workspace 资格一致，补跨阶段回归。
+3. F04：修正 Snapshot 差异重复写入；验证组合移动和事务结果。
+4. F05：统一退出码与可选知识服务非阻断语义，之后补真实客户端验证。
+5. F06/F07：关闭启动漏事件窗口，交付保留运行数据的薄重建入口；明确 U02 终态入口契约。
+6. 关键 Bug 修复后再处理真实客户端/效果证据；S01–S04 仅在收益明确时实施，不作为上线阻断项混入。
+
+## 10. 工作区保护与交付
+
+审计前记录所有 Git tracked/非忽略 untracked 文件的 SHA-256 清单于隔离 `baseline.json`；审计后重新对比。预期唯一新增仓库文件为本报告，允许的 dist 构建产物被 Git 忽略。最终比对结果见下方验证记录。
+
+没有执行 commit、push、reset、clean、stash、自动格式化或修改 N00–N13 状态。业务缺陷保持原样供独立修复任务处理。审查结论针对上述本地使用范围，不是迁移批准；关键 UNKNOWN 明确保留。
+
+最终验证记录：
+
+- 初始清单共 115 个文件；重新计算 SHA-256 后，已有文件变更/丢失：**0**。
+- 非忽略新增文件：仅 `docs/reviews/n00-n13-post-implementation-review.md`。
+- Git diff 为空（报告尚未跟踪）；报告文本单独校验无尾随空白，末尾有换行。
+- 清单覆盖 tracked 和非忽略 untracked 文件；ignored 构建目录未做前后逐字节快照，不声称其内容未变。

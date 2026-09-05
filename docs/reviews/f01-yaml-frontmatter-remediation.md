@@ -1,0 +1,118 @@
+# F01 / S01：YAML-only Frontmatter 修复记录
+
+日期：2026-09-05
+
+状态：**已实施、自动验证通过，等待用户独立复核**。本记录不是用户复核通过凭证；整体 **NO-GO 保留**。N00–N13 的实现完成状态不变，不继续实施 F02。
+
+## 1. 基线与范围
+
+依据 V2 第 2、10、14、16 节、本次用户明确指定的 F01 实施范围、启动 W01 记录及原审计 F01/S01。当前 `main / 7f359aa8b41ca97817d1d9d86938d784c380893f`；开始时受跟踪业务源码无差异。原审计报告、V2 方案和 `audit-remediation-v2-startup-w01-review.md` 保留原样。
+
+仅处理 Frontmatter 解析边界及直接相关的依赖全文缓存。W01 保持 SINGLE_ONLY；Zod、路径、Workspace、实际字节 Hash、Human-First 和现有诊断契约保留。没有升级依赖或改锁文件，没有实施 F02–F07、U02/U03、存储迁移或个人配置变更。
+
+## 2. 根因和最小补丁
+
+锁定并实际读取的是 gray-matter **4.0.3**，不是根据依赖名字推测：
+
+- `node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js:57–109`：`parseMatter` 先设置默认 language，随后根据开头 delimiter 后同一行内容覆盖 `file.language`，再按该值分派 parser。
+- `lib/engine.js` 将 js/JavaScript 等别名映射到 JavaScript engine；`lib/engines.js:37–48` 的 parser 调用 eval。执行发生在 Scanner 的 Zod 校验前。默认 `language: yaml` 自身不构成修复。
+- 旧 Scanner 只做 `matter.test(source)`，它只检查开头是否为 `---`，随后调用无 options 的 `matter(source)`，无法拒绝语言 Header。
+
+新增共享 `apps/server/src/asset/frontmatter.ts:4`，实现顺序：
+
+1. 保留无 Frontmatter 的既有识别；返回 undefined 后由 Scanner 输出 MISSING_FRONTMATTER。
+2. **进入解析器前**要求开头匹配 `^---\r?\n`，即独占开头行的裸 `---`，支持 LF/CRLF。拒绝所有文件语言 Header，包括看似 YAML 的 `---yaml` / `---yml`；不修剪、不重写、不清洗输入。
+3. 通过该校验后，调用 `matter(source, { language: "yaml" })`。按安装代码逐步核对：去掉最初三个字符后只可能以 LF 或 CRLF 开头，`matter.language()` 得到的 name 必为空，文件不可能覆盖固定 YAML engine。其他 engine 虽仍存在于依赖内部，但不再能由文件输入选择。
+4. 当前 YAML engine 调用 `js-yaml.safeLoad`；不接受执行式 YAML tag。本轮的 `!!js/function` 测试按数据错误拒绝。
+
+Scanner 的 `readCandidate` 改为调用该共享入口，解析异常继续转换为单文件 INVALID_FRONTMATTER，不让一个坏文件使整个 Inbox/Status 请求返回 500。解析成功后仍执行原 Zod、路径/Workspace 校验；contentHash 仍由原始 Buffer 计算。
+
+## 3. 生产调用点接线核验
+
+检索 `apps/server/src` 后，gray-matter 只由 `asset/frontmatter.ts` 引入；唯一生产 `matter(source, …)` 在该文件。共享入口只有 Scanner 调用，没有其他生产直接解析路径。
+
+| 入口 | 当前实际调用链 |
+|---|---|
+| 正式扫描 | `scanAssetRepository → scanRepositoryDirectory → scanDirectory → readCandidate → parseYamlFrontmatter`；IndexManager 也使用正式 Scanner。 |
+| 定向复核 | `scanAssetFiles → readCandidate → parseYamlFrontmatter`；Search、Read、Mark Used 前的资格 Read 和 Library 当前文件复核都沿此路径。 |
+| Inbox GET | `GET /api/inbox → InboxApplicationService.scan → scanInboxRepository → … → readCandidate → parseYamlFrontmatter`。 |
+| System Status | `GET /api/system/status → SystemStatusApplicationService.get → scanAssetRepository + InboxApplicationService.scan → 同一入口`。 |
+| Confirm Preflight | `confirmInboxAsset → scanInbox/scanFormalAssets → scanInboxRepository/scanAssetRepository → 同一入口`；后续重验也复用 Scanner。 |
+
+本项没有改动 F02 的目录资格或 F03 的投影规则；上述接线证明 F01 解析入口统一，不表示其余缺陷已解决。
+
+## 4. 先红后绿：同一正式反例
+
+先新增 `apps/server/test/frontmatter-security.test.ts`，在未修改生产源码时运行。每次用 mkdtemp 创建独立 Repository、配置、SQLite 和 marker；所有 payload 只向自己的临时目录写入 `F01 executed`，没有读取真实数据或凭据。
+
+原 Header `---javascript` 后的表达式写入 marker，再返回具有合法 id/type/scope/title/summary 的对象。修复前四入口都通过 Schema 并错误接受它：
+
+| 入口 | 修复前 marker / 接受 | 修复后 marker / 接受 | 修复后诊断 |
+|---|---|---|---|
+| 正式 Scanner | true / true | false / false | INVALID_FRONTMATTER |
+| 实际 HTTP Inbox GET | true / true，HTTP 200 | false / false，HTTP 200 | INVALID_FRONTMATTER |
+| 实际 HTTP System Status | true / true，错误计入正式和 Inbox 数量 | false / false，HTTP 200，两个区域各剩 1 个合法文件 | 正式及 Inbox 各一条 INVALID_FRONTMATTER |
+| Confirm Preflight | true / true，隔离候选被错误晋升 | false / false，源字节保留，目标不存在 | INBOX_ASSET_INVALID（来自 Scanner 的 INVALID_FRONTMATTER） |
+
+四类入口均重复覆盖 9 种 Header：`---javascript`、`---js`、`---JavaScript`、`--- javascript`、`---\tjs`（实际制表符）、`---yaml`、`---yml`、`---json`、`---toml`。JS 的 5 种变体修复前均创建 marker；yaml/yml/json 未创建 marker，但错误取得资格；toml 原本就拒绝。本轮没有把原本通过的安全拒绝当作新修复。
+
+修复前安全断言：`Frontmatter must never execute a marker write` 失败（actual=true）；语言数据 Header 的资格拒绝断言失败（actual=true）。S01 的“Scanner 不得将原文留在 gray-matter cache”断言也失败。
+
+修复前命令 exit **1**，Node 测试统计 **42 项：5 pass / 37 fail**；其中 36 个 Header 子用例有 32 个失败、4 个原本拒绝的 toml 通过，4 个父测试随之失败；另外 cache 测试失败，安全 YAML tag/正文文本测试原本通过。不要把父测试计数解释成额外漏洞。
+
+修复后同一文件的 **42 项全部通过**（在定向和全量命令中运行，安全断言未弱化）。HTTP 测试用本机随机端口真实 socket、真实 Hono 路由和 ApplicationService；没有用 helper mock 替代路由。Status fixture 不启动 watcher，确保该 GET 自身执行两类扫描，不依赖后台提前扫描产生证据。
+
+每个 Header 的修复后测试同时验证合法兄弟文件不受影响。Confirm 只拒绝所选非法样本，并随后成功确认另一个明确选择的合法隔离样本；原正式文件字节不变。
+
+## 5. S01：避免全文缓存写入及旧结果复用
+
+实际依赖 `index.js:35–50` 的流程为：先做一次 `matter.cache[file.content]` 属性查询；**仅在 `!options` 时**才返回该缓存对象或写入新对象。传入真实 options 对象后，不消费查询结果，也不写入缓存。没有使用不存在的 `cache:false`，没有清空全局缓存或新建缓存层。
+
+`frontmatter-security.test.ts:109` 的可验证证据：
+
+- LF、CRLF 和中文正文/摘要、组合 Unicode、emoji 均正常解析，Markdown 和 SHA-256 与实际写入字节一致。
+- 同一文件重复定向扫描，不创建以全文为 key 的缓存条目。
+- 测试主动通过依赖 API 给同一原文植入 `STALE_CACHE_MARKER` 旧摘要/正文，正式定向扫描及 Application Read 都忽略它。
+- 文件修改后即读取当前内容、当前 Hash，不返回旧文本；没有规范化源文件。测试最后只清理自己创建的缓存条目。
+
+这里的“禁用缓存”准确含义是不存储生产原文、不复用跨请求解析结果；不声称改掉了依赖内部那一次无结果消费的属性查询，也不修改其他调用者的缓存。
+
+## 6. 实际命令与结果
+
+以下命令均在仓库根按顺序运行；每条命令仅设置当前进程 PATH，使用现有 Node.js **22.16.0** / pnpm **11.1.3**：
+
+```sh
+PATH=/Users/hemu/.npm/_npx/78120b5db7e8f750/node_modules/node/bin:$PATH <下列命令>
+```
+
+| 命令 | 本轮结果 |
+|---|---|
+| `pnpm --filter @codex-memory-os/server exec tsx --test --test-concurrency=1 test/frontmatter-security.test.ts`（补丁前） | exit 1；42 项，5 pass / 37 fail；记录了真实 marker 和错误接受状态。 |
+| `pnpm --filter @codex-memory-os/server exec tsx --test --test-concurrency=1 test/frontmatter-security.test.ts test/asset-scanner.test.ts test/asset-search.test.ts test/asset-confirmation.test.ts test/rest.test.ts`（补丁后） | exit 0；71/71，0 failed，0 skipped；含同一 F01 42 项。 |
+| `pnpm test` | exit 0；Server 123、Hub 43、ID 4，共 170/170；Server/ID 0 skipped。根脚本按既有配置调度包内测试，没有委派 Agent。 |
+| `pnpm typecheck` | exit 0；全部 workspace 包通过。 |
+| `pnpm build` | exit 0；Server、Hub、ID 构建通过，仅生成既有 ignored 产物。 |
+| `pnpm --filter @codex-memory-os/server exec node test-support/frontmatter-security-build-smoke.mjs` | exit 0；F01_BUILD_SMOKE status=ok，markerExists=false。使用编译后的 Runtime 启动服务，GET 正式列表/Inbox/Status；启动扫描、请求扫描安全拒绝；真实 dist Confirm CLI 拒绝非法样本（exit 2、INBOX_ASSET_INVALID）、成功处理合法 CRLF 样本并保持字节 Hash。 |
+| `pnpm --filter @codex-memory-os/server smoke:mcp:build` | exit 0；N08_BUILD_SMOKE status=ok，六工具主链路通过。 |
+| `pnpm --filter @codex-memory-os/server smoke:asset-confirm:build` | exit 0；N12_ASSET_CONFIRM_BUILD_SMOKE status=ok，现有实际 package 命令成功确认隔离样本。 |
+| `git diff --check` 与新增文件尾随空白检查 | 通过。 |
+
+命令原始输出位于 `/var/folders/3k/g7_mt00n1rdfxx__dj6vnnk00000gn/T/codex-f01-remediation-ioh1lmee/`：`before.log`、`targeted.log`、`full-test.log`、`typecheck.log`、`build.log`、`f01-build-smoke.log`、`mcp-build-smoke.log`、`confirm-build-smoke.log`。该目录仅辅助保留本轮输出；长期复现依赖仓库正式测试和本记录，不依赖临时脚本继续存在。
+
+## 7. 修改文件与保护结果
+
+| 文件 | 必要性 |
+|---|---|
+| `apps/server/src/asset/frontmatter.ts`（新增） | 唯一共享 YAML-only 边界，显式绕过依赖全文缓存。 |
+| `apps/server/src/asset/scanner.ts`（修改） | 将所有 Scanner 路径接入新边界，保留原诊断和后续校验。 |
+| `apps/server/test/frontmatter-security.test.ts`（新增） | 四入口、语言变体、marker、合法兄弟文件、字节和 cache 正式回归。 |
+| `apps/server/test-support/frontmatter-security-build-smoke.mjs`（新增） | 可重复执行的编译产物真实 HTTP 和 CLI 验证。 |
+| 本记录（新增） | 保存修复前后证据、验证范围和独立复核状态，不覆盖历史。 |
+
+开始时已有的 `.idea` 暂存项、`pelican-bicycle.html`、原审计、V2 和启动记录保留。未执行 commit/push/reset/clean/stash，未修改 package.json、锁文件、其他生产模块和已有测试。
+
+最终 SHA-256 清单核验：启动时 120 个 tracked / 非忽略 untracked 文件中，仅 `apps/server/src/asset/scanner.ts` 改变，其余 119 个全部保持原字节；新增文件恰为上表中的 4 个新增项。`git diff --check` 通过，新增文件逐一检查无尾随空白且以换行结束。清单不覆盖 ignored 构建产物。
+
+未使用真实 Asset Repository、运行数据库、个人 Codex/MCP/Hook 配置；只操作测试自行创建的 mkdtemp 目录和构建产物。仓库外真实数据未做逐字节快照，不把“未操作”写成全盘完整性证明。F02–F07、真实客户端和其他原审计 UNKNOWN 均不在本轮修复结论内；未运行实际 Codex 生命周期、真实浏览器视觉验收或迁移。
+
+Memory Capture: NOOP — 修复依据和反例均可从当前源码、正式回归与本记录低成本恢复，不新增记忆副本。

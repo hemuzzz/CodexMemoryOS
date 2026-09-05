@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>鹈鹕的海边骑行</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100svh; display: grid; place-items: center; background: #dcefeb; color: #24484c; font-family: system-ui, sans-serif; padding: 24px; }
+    main { width: min(100%, 1080px); }
+    header { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin: 0 0 22px; }
+    h1 { font-size: clamp(24px, 4vw, 38px); font-weight: 650; letter-spacing: .06em; margin: 0 0 7px; }
+    p { margin: 0; font-size: 14px; opacity: .7; }
+    button { border: 1px solid #24484c50; border-radius: 30px; background: transparent; color: inherit; padding: 11px 21px; font: inherit; cursor: pointer; white-space: nowrap; }
+    button:hover { background: #ffffff60; }
+    button:focus-visible { outline: 3px solid #df754e; outline-offset: 4px; }
+    svg { display: block; width: 100%; height: auto; border-radius: 24px; background: #c8e7ed; box-shadow: 0 18px 60px #24484c12; }
+    .wheel { animation: spin 1.6s linear infinite; }
+    .rear { transform-origin: 355px 441px; }
+    .front { transform-origin: 662px 441px; }
+    .rider { animation: bob .8s ease-in-out infinite; }
+    .scarf { transform-origin: 516px 254px; animation: flutter .8s ease-in-out infinite alternate; }
+    .clouds { animation: drift 28s linear infinite; }
+    .road { animation: road 1.6s linear infinite; }
+    .paused * { animation-play-state: paused !important; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes bob { 50% { transform: translateY(-3px); } }
+    @keyframes flutter { to { transform: rotate(7deg) scaleY(.82); } }
+    @keyframes drift { to { transform: translateX(-1100px); } }
+    @keyframes road { to { transform: translateX(-180px); } }
+    @media (max-width: 540px) { body { padding: 14px; } header { align-items: center; } p { font-size: 12px; } button { padding: 9px 14px; font-size: 13px; } }
+    @media (prefers-reduced-motion: reduce) { svg * { animation: none !important; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>海风，顺路。</h1><p>一只鹈鹕的悠闲骑行</p></div>
+    <button id="toggle" type="button" aria-pressed="false">暂停动画</button>
+  </header>
+  <svg id="scene" viewBox="0 0 1000 620" role="img" aria-labelledby="title desc" xmlns="http://www.w3.org/2000/svg">
+    <title id="title">鹈鹕骑自行车的二维动画</title>
+    <desc id="desc">白色鹈鹕系着红色围巾，在海边踩着绿色自行车。车轮旋转，云朵和路面向后移动。</desc>
+    <defs>
+      <g id="cloud" fill="#f5faf3"><path d="M0 30 Q-5 10 18 10 Q22-15 48 0 Q70-8 78 13 Q104 9 103 30Z"/></g>
+      <g id="spokes" stroke="#91aaa7" stroke-width="2">
+        <path d="M-73 0H73 M0-73V73 M-52-52L52 52 M-52 52L52-52 M-68-28L68 28 M-28-68L28 68 M-68 28L68-28 M-28 68L28-68"/>
+        <circle r="69" fill="none" stroke="#f7f4df" stroke-width="3"/>
+        <path d="M0-70A70 70 0 0 1 43-55" fill="none" stroke="#e0ac59" stroke-width="5"/>
+      </g>
+      <g id="cloudscape"><use href="#cloud" x="95" y="113"/><use href="#cloud" x="430" y="72" transform="translate(86 15) scale(.8)"/><use href="#cloud" x="815" y="154"/></g>
+    </defs>
+    <path fill="#e2f2ef" d="M0 264Q240 227 490 265T1000 251V400H0Z"/>
+    <circle cx="773" cy="119" r="48" fill="#ffdf8b"/>
+    <circle cx="773" cy="119" r="61" fill="none" stroke="#ffdf8b" stroke-opacity=".3" stroke-width="2"/>
+    <g class="clouds"><use href="#cloudscape"/><use href="#cloudscape" x="1100"/></g>
+    <path d="M0 321Q170 303 344 320T670 317T1000 324V459H0Z" fill="#84c5c7"/>
+    <g fill="none" stroke="#d2eeea" stroke-width="3" stroke-linecap="round" opacity=".8"><path d="M80 352h90m55 24h51m431-29h109m-220 43h57m192-13h86M20 405h88"/></g>
+    <path d="M0 418Q238 392 504 427T1000 410V620H0Z" fill="#eadbb6"/>
+    <path d="M0 492Q470 468 1000 491V568H0Z" fill="#f8edcf"/>
+    <g class="road" stroke="#d3bd90" stroke-width="3" stroke-linecap="round"><path d="M0 544h45m135 0h45m135 0h45m135 0h45m135 0h45m135 0h45m135 0h45"/></g>
+    <g stroke="#6b9c86" stroke-width="3" fill="none" stroke-linecap="round"><path d="M95 472l-7-24m7 24 12-19m800 16-5-22m5 22 12-13M830 579l-8-20m8 20 8-25"/></g>
+    <ellipse cx="512" cy="522" rx="231" ry="12" fill="#8e8e701c"/>
+    <!-- The wheel hubs remain fixed while the spokes rotate. -->
+    <g fill="#d9e7d233" stroke="#29494c" stroke-width="10"><circle cx="355" cy="441" r="78"/><circle cx="662" cy="441" r="78"/></g>
+    <g class="wheel rear"><use href="#spokes" x="355" y="441"/></g>
+    <g class="wheel front"><use href="#spokes" x="662" y="441"/></g>
+    <g stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <path d="M355 441L425 327L484 441H355L604 330L484 441M604 330L662 441M425 327H604" stroke="#24484c" stroke-width="12"/>
+      <path d="M355 441L425 327L484 441H355L604 330L484 441M604 330L662 441M425 327H604" stroke="#438f80" stroke-width="7"/>
+      <path d="M425 327L416 305M604 330L587 284L617 275Q634 274 629 287" stroke="#29494c" stroke-width="7"/>
+      <path d="M392 305H443" stroke="#815b46" stroke-width="13"/>
+      <path d="M346 352Q294 353 277 391M623 354Q690 328 736 396" stroke="#e9b252" stroke-width="5"/>
+    </g>
+    <circle cx="484" cy="441" r="22" fill="#f4e9cc" stroke="#29494c" stroke-width="4"/>
+    <circle cx="355" cy="441" r="7" fill="#29494c"/><circle cx="662" cy="441" r="7" fill="#29494c"/>
+    <path id="far-leg" d="" fill="none" stroke="#c98642" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <g class="rider">
+      <!-- Tail, rounded body, long neck and a broad pelican throat pouch. -->
+      <path d="M411 280L347 251Q351 283 399 303" fill="#f7f7e9" stroke="#29494c" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M395 260Q411 227 459 239Q481 239 491 210L497 172Q500 143 528 145Q556 147 557 175Q557 194 538 205L535 252Q534 304 484 319Q418 332 395 295Q386 280 395 260Z" fill="#fffdf0" stroke="#29494c" stroke-width="3"/>
+      <path d="M405 271Q444 246 487 271Q482 305 445 301Q423 297 405 271Z" fill="#dce8df" stroke="#29494c" stroke-width="2.5"/>
+      <path d="M421 278Q446 284 469 278" fill="none" stroke="#a6bbb4" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M542 180L674 196Q649 237 586 230Q550 225 542 194Z" fill="#edb85a" stroke="#29494c" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M543 176Q613 177 683 196L546 198Z" fill="#ffd47d" stroke="#29494c" stroke-width="3" stroke-linejoin="round"/>
+      <circle cx="532" cy="169" r="5" fill="#29494c"/><circle cx="533" cy="167.5" r="1.5" fill="#fff"/>
+      <path d="M511 143l-7-12m16 11-1-14" stroke="#29494c" stroke-width="3" stroke-linecap="round"/>
+      <g class="scarf"><path d="M517 247Q476 232 446 243L457 254L440 266Q481 267 519 256" fill="#de7057" stroke="#29494c" stroke-width="2.5"/></g>
+      <path d="M497 242Q513 250 536 241L535 255Q517 264 497 255Z" fill="#ee8264" stroke="#29494c" stroke-width="2.5"/>
+      <path d="M475 272Q514 294 544 282L597 281" fill="none" stroke="#29494c" stroke-width="13" stroke-linecap="round"/>
+      <path d="M475 272Q514 294 544 282L592 281" fill="none" stroke="#f3f4e6" stroke-width="9" stroke-linecap="round"/>
+    </g>
+    <g fill="none" stroke="#29494c" stroke-width="5"><path id="crank"/></g>
+    <path id="near-leg" fill="none" stroke="#e6a451" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+    <g stroke="#29494c" stroke-width="6" stroke-linecap="round"><path id="pedal-a"/><path id="pedal-b"/></g>
+    <path id="foot" fill="#efb55f" stroke="#29494c" stroke-width="2.5" stroke-linejoin="round"/>
+    <circle cx="484" cy="441" r="5" fill="#29494c"/>
+  </svg>
+</main>
+<script>
+  const scene = document.getElementById('scene');
+  const button = document.getElementById('toggle');
+  const motion = matchMedia('(prefers-reduced-motion: reduce)');
+  let paused = motion.matches;
+  let phase = .5;
+  let previous = null;
+  const parts = Object.fromEntries(['far-leg', 'near-leg', 'crank', 'pedal-a', 'pedal-b', 'foot'].map(id => [id, document.getElementById(id)]));
+  function draw() {
+    const x = 484 + 29 * Math.cos(phase), y = 441 + 29 * Math.sin(phase);
+    const bx = 968 - x, by = 882 - y;
+    parts.crank.setAttribute('d', `M${bx} ${by}L${x} ${y}`);
+    parts['far-leg'].setAttribute('d', `M443 316L${454 + (bx - 484) * .35} ${359 + (by - 441) * .35}L${bx} ${by}`);
+    parts['near-leg'].setAttribute('d', `M466 315L${509 + (x - 484) * .45} ${359 + (y - 441) * .45}L${x} ${y - 5}`);
+    parts['pedal-a'].setAttribute('d', `M${x - 14} ${y + 5}h28`);
+    parts['pedal-b'].setAttribute('d', `M${bx - 14} ${by + 5}h28`);
+    parts.foot.setAttribute('d', `M${x - 5} ${y - 10}L${x + 19} ${y}Q${x + 21} ${y + 5} ${x + 13} ${y + 5}H${x - 10}Z`);
+  }
+  function sync() {
+    scene.classList.toggle('paused', paused);
+    button.textContent = paused ? '播放动画' : '暂停动画';
+    button.setAttribute('aria-pressed', String(paused));
+  }
+  button.addEventListener('click', () => { paused = !paused; sync(); });
+  motion.addEventListener('change', event => { paused = event.matches; sync(); });
+  function frame(now) {
+    if (previous !== null && !paused) phase += Math.min(now - previous, 60) / 1600 * Math.PI * 2;
+    previous = now;
+    draw();
+    requestAnimationFrame(frame);
+  }
+  sync(); draw(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>

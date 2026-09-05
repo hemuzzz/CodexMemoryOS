@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, readdir, readFile } from "node:fs/promises";
-import { extname, join, resolve } from "node:path";
+import { lstat, open, readdir, readFile, realpath } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { TextDecoder } from "node:util";
 
-import matter from "gray-matter";
-
+import { parseYamlFrontmatter } from "./frontmatter.js";
 import {
   ASSET_TYPES,
   assetFrontmatterSchema,
@@ -215,6 +214,7 @@ async function scanRepositoryDirectory(
 
   await scanDirectory({
     absolutePath: rootPath,
+    repositoryPath,
     completeness,
     diagnostics,
     records,
@@ -317,6 +317,7 @@ export async function scanAssetFiles(options: AssetFileScanOptions): Promise<Ass
     records.push(
       await readCandidate({
         absolutePath,
+        repositoryPath,
         location: parseAssetLocation(relativeParts),
         relativePath,
         workspaceNames,
@@ -385,6 +386,7 @@ function finalizeScan(
 
 interface ScanDirectoryContext {
   absolutePath: string;
+  repositoryPath: string;
   completeness: { value: boolean };
   diagnostics: AssetDiagnostic[];
   records: ScannedFileRecord[];
@@ -464,6 +466,7 @@ async function scanDirectory(context: ScanDirectoryContext): Promise<void> {
 
     const record = await readCandidate({
       absolutePath,
+      repositoryPath: context.repositoryPath,
       location: parseAssetLocation(relativeParts),
       relativePath,
       workspaceNames: context.workspaceNames,
@@ -475,12 +478,17 @@ async function scanDirectory(context: ScanDirectoryContext): Promise<void> {
 
 interface ReadCandidateOptions {
   absolutePath: string;
+  repositoryPath: string;
   location: AssetLocation | undefined;
   relativePath: string;
   workspaceNames: Set<string>;
 }
 
 async function readCandidate(options: ReadCandidateOptions): Promise<ScannedFileRecord> {
+  const pathFailure = await validateCurrentFilePath(options);
+  if (pathFailure !== undefined) {
+    return invalidFileRecord(options.relativePath, [pathFailure]);
+  }
   let bytes: Buffer;
   let fileSize: number;
   let modifiedAt: string;
@@ -529,23 +537,23 @@ async function readCandidate(options: ReadCandidateOptions): Promise<ScannedFile
     );
   }
 
-  if (!matter.test(source)) {
-    return invalidFileRecord(
-      options.relativePath,
-      [
-        diagnostic("MISSING_FRONTMATTER", options.relativePath, "Markdown file has no YAML frontmatter"),
-      ],
-    );
-  }
-
   let parsedMatter;
   try {
-    parsedMatter = matter(source);
+    parsedMatter = parseYamlFrontmatter(source);
   } catch (error) {
     return invalidFileRecord(
       options.relativePath,
       [
         diagnostic("INVALID_FRONTMATTER", options.relativePath, `Unable to parse YAML frontmatter: ${errorMessage(error)}`),
+      ],
+    );
+  }
+
+  if (parsedMatter === undefined) {
+    return invalidFileRecord(
+      options.relativePath,
+      [
+        diagnostic("MISSING_FRONTMATTER", options.relativePath, "Markdown file has no YAML frontmatter"),
       ],
     );
   }
@@ -593,6 +601,53 @@ async function readCandidate(options: ReadCandidateOptions): Promise<ScannedFile
     id: parsedFrontmatter.data.id,
     relativePath: options.relativePath,
   };
+}
+
+// Both full and targeted scans revalidate here immediately before opening a file.
+// Only the configured root and descendants reject symlinks; system aliases ABOVE
+// the root (e.g. macOS /var) remain valid. This is not an atomic filesystem walk.
+async function validateCurrentFilePath(options: ReadCandidateOptions): Promise<AssetDiagnostic | undefined> {
+  const { repositoryPath, absolutePath, relativePath } = options;
+  const withinRepository = relative(repositoryPath, absolutePath);
+  if (withinRepository === "" || withinRepository === ".." || withinRepository.startsWith(`..${sep}`) || isAbsolute(withinRepository)) {
+    return diagnostic("INVALID_ASSET_PATH", relativePath, "Asset file must be inside the configured Repository");
+  }
+
+  try {
+    const root = await lstat(repositoryPath);
+    if (root.isSymbolicLink() || !root.isDirectory()) {
+      return diagnostic("REPOSITORY_UNAVAILABLE", relativePath, "Asset Repository must be a regular directory and must not be a symlink");
+    }
+  } catch (error) {
+    return diagnostic("REPOSITORY_UNAVAILABLE", relativePath, `Asset Repository is unavailable: ${errorMessage(error)}`);
+  }
+
+  try {
+    const realRepositoryPath = await realpath(repositoryPath);
+    const parts = withinRepository.split(sep);
+    let currentPath = repositoryPath;
+    for (const [index, part] of parts.entries()) {
+      currentPath = join(currentPath, part);
+      const stats = await lstat(currentPath);
+      if (stats.isSymbolicLink()) {
+        return diagnostic("SYMLINK", relativePath, "Asset files and their Repository-relative parents must not be symlinks");
+      }
+      if (index < parts.length - 1) {
+        if (!stats.isDirectory()) {
+          return diagnostic("FILE_READ_ERROR", relativePath, "Asset parent must be a directory");
+        }
+      } else if (!stats.isFile()) {
+        return diagnostic(stats.isDirectory() ? "DIRECTORY_ASSET" : "NON_REGULAR_FILE", relativePath, "Only regular Markdown files can be Assets");
+      }
+    }
+    const realRelativePath = relative(realRepositoryPath, await realpath(absolutePath));
+    if (realRelativePath === "" || realRelativePath === ".." || realRelativePath.startsWith(`..${sep}`) || isAbsolute(realRelativePath)) {
+      return diagnostic("INVALID_ASSET_PATH", relativePath, "Resolved Asset file must remain inside the configured Repository");
+    }
+  } catch (error) {
+    return diagnostic("FILE_READ_ERROR", relativePath, `Unable to validate current Asset path: ${errorMessage(error)}`);
+  }
+  return undefined;
 }
 
 function classifyFrontmatterFailure(data: unknown, relativePath: string): AssetDiagnostic | undefined {

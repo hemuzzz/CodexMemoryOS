@@ -327,6 +327,7 @@ test("N13 freezes the Golden Query matrix and proves A0/A1/A2 incremental Loadou
       turn_id: "turn-3",
     }, {
       databasePath: fixture.databasePath,
+      repositoryPath: fixture.repositoryPath,
       workspaceConfigPath: fixture.workspaceConfigPath,
     }, silentLogger);
     assert.notEqual(hookOutput, null);

@@ -1,5 +1,7 @@
 # N00 HTTP MCP Ping Spike
 
+实验结果见 [N00 HTTP MCP 连通性验证](../../项目文档/验证记录/01-N00-HTTP-MCP连通性验证.md)。
+
 This isolated Spike verifies only the Streamable HTTP MCP transport selected by CodexMemoryOS Revision 2.1. It deliberately contains no Asset, SQLite, Task, Loadout, Usage, Hook, REST, Vue, or STDIO Adapter implementation.
 
 ## Runtime

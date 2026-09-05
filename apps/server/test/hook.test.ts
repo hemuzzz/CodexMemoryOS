@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,10 +9,12 @@ import test from "node:test";
 import Database from "better-sqlite3";
 
 import {
+  HOOK_ASSET_REPOSITORY_PATH_ENV,
   HOOK_DATABASE_PATH_ENV,
   HOOK_WORKSPACE_CONFIG_PATH_ENV,
   createUserPromptSubmitHookConfiguration,
 } from "../src/hook/user-prompt-submit.js";
+import { AssetIndexManager } from "../src/asset/index.js";
 import { LOG_PATH_ENV } from "../src/logging.js";
 
 const hookSourcePath = fileURLToPath(new URL("../src/hook/user-prompt-submit.ts", import.meta.url));
@@ -119,11 +121,21 @@ test("N08 Hook reads an existing Loadout without automatically resolving or refr
         estimatedCharacters: 100,
       }],
     };
+    const assetDirectory = join(fixture.repositoryPath, "assets/global/memories");
+    await mkdir(assetDirectory, { recursive: true });
+    await writeFile(join(assetDirectory, "rule.md"), `---
+id: ${assetId}
+type: MEMORY
+scope: GLOBAL
+title: Historical rule
+summary: Reuse the confirmed historical boundary
+---
+正文
+`);
+    const index = await AssetIndexManager.create(fixture);
+    try { await index.synchronize(); } finally { await index.close(); }
     const database = new Database(fixture.databasePath);
     try {
-      database.exec("CREATE TABLE asset_catalog (asset_id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT NOT NULL)");
-      database.prepare("INSERT INTO asset_catalog (asset_id, title, summary) VALUES (?, ?, ?)")
-        .run(assetId, "Historical rule", "Reuse the confirmed historical boundary");
       database.prepare("UPDATE task_loadout SET loadout_json = ?, updated_at = ? WHERE task_id = ?")
         .run(JSON.stringify(loadout), "2026-09-04T10:00:00.000Z", taskId);
     } finally {
@@ -349,6 +361,7 @@ interface Fixture {
   databasePath: string;
   otherWorkspacePath: string;
   rootPath: string;
+  repositoryPath: string;
   unmatchedPath: string;
   workspaceConfigPath: string;
   workspacePath: string;
@@ -386,6 +399,7 @@ async function createFixture(): Promise<Fixture> {
   );
   return {
     rootPath,
+    repositoryPath: join(rootPath, "repository"),
     workspacePath,
     otherWorkspacePath,
     unmatchedPath,
@@ -405,6 +419,7 @@ async function runHookSource(source: string, fixture: Fixture): Promise<HookProc
       cwd: process.cwd(),
       env: {
         ...process.env,
+        [HOOK_ASSET_REPOSITORY_PATH_ENV]: fixture.repositoryPath,
         [HOOK_DATABASE_PATH_ENV]: fixture.databasePath,
         [HOOK_WORKSPACE_CONFIG_PATH_ENV]: fixture.workspaceConfigPath,
         [LOG_PATH_ENV]: join(fixture.rootPath, "logs", "codex-memory-os.log"),

@@ -357,30 +357,33 @@ function calculateDifference(
   diagnostics: readonly AssetDiagnostic[],
 ): SnapshotDifference {
   const assetsById = new Map(assets.map((asset) => [asset.frontmatter.id, asset]));
-  const assetsByPath = new Map(assets.map((asset) => [asset.relativePath, asset]));
+  const rowsById = new Map(catalogRows.map((row) => [row.assetId, row]));
   const invalidPaths = new Set(diagnostics.map(({ path }) => path));
-  const consumedAssetIds = new Set<string>();
+  const added: ScannedAsset[] = [];
   const changed: ScannedAsset[] = [];
   const changedRows: CatalogRow[] = [];
   const invalidatedRows: CatalogRow[] = [];
   const removedRows: CatalogRow[] = [];
   const unchanged: ScannedAsset[] = [];
 
-  for (const row of catalogRows) {
-    const sameIdAsset = assetsById.get(row.assetId);
-    const replacement = sameIdAsset ?? assetsByPath.get(row.filePath);
-
-    if (replacement !== undefined) {
-      consumedAssetIds.add(replacement.frontmatter.id);
-      if (sameIdAsset !== undefined && sameCatalogValues(row, sameIdAsset)) {
-        unchanged.push(sameIdAsset);
-      } else {
-        changedRows.push(row);
-        changed.push(replacement);
-      }
-      continue;
+  // The Scanner supplies unique qualified IDs. Derive each new write from that
+  // identity once; reusing an old path does not reuse the old Asset identity.
+  for (const asset of assetsById.values()) {
+    const row = rowsById.get(asset.frontmatter.id);
+    if (row === undefined) {
+      added.push(asset);
+    } else if (sameCatalogValues(row, asset)) {
+      unchanged.push(asset);
+    } else {
+      changedRows.push(row);
+      changed.push(asset);
     }
+  }
 
+  // Disappeared identities are independent of new writes at their former paths.
+  // applySnapshot deletes all affected rows before inserting any new row.
+  for (const row of catalogRows) {
+    if (assetsById.has(row.assetId)) continue;
     if (invalidPaths.has(row.filePath)) {
       invalidatedRows.push(row);
     } else {
@@ -389,7 +392,7 @@ function calculateDifference(
   }
 
   return {
-    added: assets.filter(({ frontmatter }) => !consumedAssetIds.has(frontmatter.id)),
+    added,
     changed,
     changedRows,
     invalidatedRows,

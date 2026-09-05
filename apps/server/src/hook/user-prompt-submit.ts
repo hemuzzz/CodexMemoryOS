@@ -5,8 +5,8 @@ import { pathToFileURL } from "node:url";
 import { SnowflakeIdGenerator } from "@codex-memory-os/id-generator";
 import { z } from "zod";
 
+import { AssetSearchService } from "../asset/index.js";
 import {
-  LoadoutAssetProjectionRepository,
   LoadoutError,
   renderStoredTaskLoadout,
 } from "../loadout/index.js";
@@ -21,6 +21,7 @@ import {
 
 export const HOOK_DATABASE_PATH_ENV = "CODEX_MEMORY_OS_DATABASE_PATH";
 export const HOOK_WORKSPACE_CONFIG_PATH_ENV = "CODEX_MEMORY_OS_WORKSPACES_PATH";
+export const HOOK_ASSET_REPOSITORY_PATH_ENV = "CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH";
 
 const noOpEvents = new Set(["Stop", "Interrupt", "SessionEnd"]);
 const hookEnvelopeSchema = z
@@ -41,6 +42,7 @@ const userPromptSubmitSchema = z
 export interface HookRuntimeConfiguration {
   databasePath: string;
   workspaceConfigPath: string;
+  repositoryPath?: string;
 }
 
 export interface UserPromptSubmitHookConfiguration {
@@ -122,7 +124,7 @@ export async function handleCodexHook(
     await mkdir(dirname(configuration.databasePath), { recursive: true });
   }
   const repository = new TaskRepository(configuration.databasePath);
-  let assetProjection: LoadoutAssetProjectionRepository | undefined;
+  let assetReader: AssetSearchService | undefined;
   try {
     const service = new TaskApplicationService(repository, { idGenerator });
     const resolution = service.resolveTask({
@@ -132,10 +134,26 @@ export async function handleCodexHook(
       workspace,
       ...(explicitTaskId === undefined ? {} : { explicitTaskId }),
     });
-    assetProjection = new LoadoutAssetProjectionRepository(configuration.databasePath);
     let additionalContext: string;
     try {
-      additionalContext = renderStoredTaskLoadout(resolution.task, assetProjection);
+      additionalContext = await renderStoredTaskLoadout(resolution.task, {
+        read: async (input) => {
+          if (assetReader === undefined) {
+            if (configuration.repositoryPath === undefined) {
+              throw new HookError("HOOK_CONFIGURATION_INVALID", `${HOOK_ASSET_REPOSITORY_PATH_ENV} is required to project a non-empty Loadout`);
+            }
+            assetReader = new AssetSearchService({
+              databasePath: configuration.databasePath,
+              repositoryPath: configuration.repositoryPath,
+              workspaceConfigPath: configuration.workspaceConfigPath,
+              // The independent Hook reads current files; only the main service
+              // maintains the index. Do not start a watcher or write projections.
+              refreshIndex: async () => undefined,
+            });
+          }
+          return assetReader.read(input);
+        },
+      });
     } catch (error) {
       safeLog(logger, {
         error,
@@ -154,7 +172,7 @@ export async function handleCodexHook(
       },
     });
   } finally {
-    assetProjection?.close();
+    assetReader?.close();
     repository.close();
   }
 }
@@ -221,10 +239,14 @@ function runtimeConfigurationFromEnvironment(environment: NodeJS.ProcessEnv): Ho
       `${HOOK_DATABASE_PATH_ENV} and ${HOOK_WORKSPACE_CONFIG_PATH_ENV} must both be configured`,
     );
   }
-  return { databasePath, workspaceConfigPath };
+  const repositoryPath = environment[HOOK_ASSET_REPOSITORY_PATH_ENV];
+  return { databasePath, workspaceConfigPath, ...(repositoryPath === undefined ? {} : { repositoryPath }) };
 }
 
 function assertRuntimeConfiguration(configuration: HookRuntimeConfiguration): void {
+  if (configuration.repositoryPath !== undefined && !isAbsolute(configuration.repositoryPath) && !win32.isAbsolute(configuration.repositoryPath)) {
+    throw new HookError("HOOK_CONFIGURATION_INVALID", "Asset Repository path must be absolute");
+  }
   if (configuration.databasePath !== ":memory:" && !isAbsolute(configuration.databasePath) && !win32.isAbsolute(configuration.databasePath)) {
     throw new HookError("HOOK_CONFIGURATION_INVALID", "Task database path must be absolute");
   }

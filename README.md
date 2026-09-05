@@ -4,6 +4,10 @@ CodexMemoryOS 是一个个人、本地、Codex 专用的知识运行时。Markdo
 
 当前 MVP 提供 Workspace 隔离的 Search/Read、显式 Task Loadout、Usage、只读 Hub/REST、HTTP MCP 和单文件人工确认命令。它不依赖模型 API、MemoryProxy、Obsidian 或团队服务，也不会自动捕获、自动确认或批量确认知识。Hub 只读，不提供确认、编辑、移动或删除操作。
 
+## 项目文档
+
+设计方案、工程约定、审查与验证记录统一见 [项目文档索引](项目文档/文档索引.md)。新增或整理文档时遵循 [文档约定](工程约定/文档约定.md)，Agent 工作规则见 [AGENTS.md](AGENTS.md)。
+
 ## 环境与安装
 
 固定运行基线：
@@ -108,7 +112,7 @@ shasum -a 256 '/absolute/asset-repository/inbox/workspaces/example-project/memor
 
 | 环境变量 | 使用方 | 含义 |
 |---|---|---|
-| `CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH` | Server、`asset:confirm` | Asset Repository 绝对路径 |
+| `CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH` | Server、Hook、`asset:confirm` | Asset Repository 绝对路径；Hook 投影非空 Loadout 时必须配置 |
 | `CODEX_MEMORY_OS_DATABASE_PATH` | Server、Hook | SQLite 绝对路径 |
 | `CODEX_MEMORY_OS_WORKSPACES_PATH` | Server、Hook、`asset:confirm` | `workspaces.json` 绝对路径 |
 | `CODEX_MEMORY_OS_LOG_PATH` | Server、Hook | 日志文件；建议显式配置绝对路径 |
@@ -195,7 +199,7 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 \
         "hooks": [
           {
             "type": "command",
-            "command": "CODEX_MEMORY_OS_DATABASE_PATH='/absolute/runtime/codex-memory.sqlite' CODEX_MEMORY_OS_WORKSPACES_PATH='/absolute/config/workspaces.json' CODEX_MEMORY_OS_LOG_PATH='/absolute/logs/codex-memory-os.log' npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --dir '/absolute/CodexMemoryOS' --filter @codex-memory-os/server hook:user-prompt-submit",
+            "command": "CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH='/absolute/asset-repository' CODEX_MEMORY_OS_DATABASE_PATH='/absolute/runtime/codex-memory.sqlite' CODEX_MEMORY_OS_WORKSPACES_PATH='/absolute/config/workspaces.json' CODEX_MEMORY_OS_LOG_PATH='/absolute/logs/codex-memory-os.log' npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --dir '/absolute/CodexMemoryOS' --filter @codex-memory-os/server hook:user-prompt-submit",
             "timeout": 10,
             "additionalContextLimit": 3000
           }

@@ -155,7 +155,14 @@ test("applies added, changed, moved, replaced, removed, and unchanged Assets inc
         assetSource({ body: "正文改为发票申请", id: replacementId, scope: "GLOBAL", title: "发票申请规则", type: "MEMORY" }),
       );
       now = new Date("2026-09-04T01:04:00.000Z");
-      assert.equal((await manager.synchronize())?.changed, 1);
+      // Reusing a path with a new ID removes one identity and adds another.
+      assert.deepEqual(await manager.synchronize(), {
+        added: 1,
+        changed: 0,
+        invalidated: 0,
+        removed: 1,
+        unchanged: 1,
+      });
       assert.equal(catalogRow(database, replacementId).filePath, movedPath);
       assert.equal(catalogCount(database, globalId), 0);
       assert.equal(matchCount(database, "资金结算"), 0);

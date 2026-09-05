@@ -1,4 +1,4 @@
-import type { AssetSearchItem, AssetSearchService } from "../asset/index.js";
+import { AssetNotAccessibleError, AssetNotFoundError, type AssetSearchItem, type AssetSearchService } from "../asset/index.js";
 import {
   TaskApplicationService,
   TaskNotRunningError,
@@ -258,15 +258,35 @@ export function parseTaskLoadout(loadoutJson: string): TaskLoadout {
   return result.data;
 }
 
-export function renderStoredTaskLoadout(
+export async function renderStoredTaskLoadout(
   task: TaskRecord,
-  assetProjection: LoadoutAssetProjectionRepository,
-): string {
+  assetReader: Pick<AssetSearchService, "read">,
+): Promise<string> {
   const loadout = parseTaskLoadout(task.loadoutJson);
-  const metadata = assetProjection.findMetadata(loadout.assets.map(({ assetId }) => assetId));
+  const metadata = new Map<string, LoadoutAssetMetadata>();
+  const projectedAssets: TaskLoadoutAsset[] = [];
+  for (const asset of loadout.assets) {
+    let current;
+    try {
+      current = await assetReader.read({ assetId: asset.assetId, context: { workspace: task.workspace } });
+    } catch (error) {
+      if (!(error instanceof AssetNotFoundError || error instanceof AssetNotAccessibleError)) {
+        throw error;
+      }
+      // Retain historical fields, but provide no dynamic content for this item.
+      projectedAssets.push(asset);
+      continue;
+    }
+    const { frontmatter } = current;
+    metadata.set(asset.assetId, { assetId: asset.assetId, title: frontmatter.title, summary: frontmatter.summary });
+    // This is a transient rendering choice; never rewrite the saved mode/reason.
+    projectedAssets.push(asset.mode === "DIRECT" && frontmatter.type !== "MEMORY"
+      ? { ...asset, mode: "ON_DEMAND" }
+      : asset);
+  }
   return renderLoadoutForHook({
     assetMetadata: metadata,
-    loadout,
+    loadout: { ...loadout, assets: projectedAssets },
     status: task.status,
     taskId: task.taskId,
     workspace: task.workspace,

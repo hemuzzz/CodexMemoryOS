@@ -65,6 +65,8 @@ export class AssetIndexManager {
   #scannerDiagnostics: IndexDiagnostic[] = [];
   #watchers: FSWatcher[] = [];
   #watcherState: WatcherState = "NOT_STARTED";
+  #starting = false;
+  #startPromise: Promise<AssetIndexStatus> | undefined;
 
   private constructor(options: AssetIndexOptions) {
     this.#repositoryPath = resolve(options.repositoryPath);
@@ -98,13 +100,22 @@ export class AssetIndexManager {
 
   async start(): Promise<AssetIndexStatus> {
     this.#assertOpen();
-    if (this.#watchers.length > 0) {
+    if (this.#starting && this.#startPromise !== undefined) return this.#startPromise;
+    if (this.#watchers.length > 0) return this.status();
+    this.#starting = true;
+    this.#startPromise = (async () => {
+      try {
+        await this.synchronize();
+        await this.#startWatcher();
+        // ignoreInitial does not report changes between the first scan and ready.
+        // Reconcile through the same queue as ordinary watcher events.
+        await this.synchronize();
+      } finally {
+        this.#starting = false;
+      }
       return this.status();
-    }
-
-    await this.synchronize();
-    await this.#startWatcher();
-    return this.status();
+    })();
+    return this.#startPromise;
   }
 
   synchronize(): Promise<CatalogSyncResult | null> {
@@ -146,7 +157,7 @@ export class AssetIndexManager {
       catalogCount: counts?.catalog ?? null,
       diagnostics: [...this.#scannerDiagnostics, ...this.#runtimeDiagnostics].sort(compareDiagnostics),
       ftsCount: counts?.fts ?? null,
-      indexState: this.#indexState,
+      indexState: this.#starting && this.#indexState === "READY" ? "NOT_READY" : this.#indexState,
       lastSuccessfulScanAt: this.#lastSuccessfulScanAt,
       rebuildRequired: this.#indexState === "REBUILD_REQUIRED",
       watcherState: this.#watcherState,

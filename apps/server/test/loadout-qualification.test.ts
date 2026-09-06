@@ -127,12 +127,29 @@ test("F03 non-empty Hook requires a repository path; no fallback to stored metad
   } finally { await fixture.close(); }
 });
 
-test("F03 eligible summary growth still uses the existing render budget error", async () => {
+test("F03/U04 eligible summary growth downgrades only this qualified projection", async () => {
   const fixture = await createFixture("updated");
   try {
     await writeFile(join(fixture.repositoryPath, "assets/workspaces/alpha/memories/one.md"),
       source(fixture.assetId, "alpha", "MEMORY", "Current allowed title", "合格摘要".repeat(1000)));
-    await assert.rejects(loadouts.renderStoredTaskLoadout(fixture.storedTask(), fixture.search), loadouts.LoadoutRenderError);
+    const rendered = await loadouts.renderStoredTaskLoadout(fixture.storedTask(), fixture.search);
+    assert.ok(loadouts.unicodeCharacterCount(rendered) <= 3000);
+    assert.doesNotMatch(rendered, /合格摘要/u);
+    assert.match(rendered, new RegExp(`ON_DEMAND ${fixture.assetId}`));
+    assert.match(rendered, /LEGAL_SIBLING_SUMMARY/u);
+    fixture.assertFrozen();
+  } finally { await fixture.close(); }
+});
+
+test("U04 an oversized qualified title omits that item and preserves a valid sibling and all stored rows", async () => {
+  const fixture = await createFixture("updated");
+  try {
+    await writeFile(join(fixture.repositoryPath, "assets/workspaces/alpha/memories/one.md"),
+      source(fixture.assetId, "alpha", "MEMORY", "过长标题".repeat(1000), "QUALIFIED_BUT_OVERSIZED"));
+    const rendered = await loadouts.renderStoredTaskLoadout(fixture.storedTask(), fixture.search);
+    assert.ok(loadouts.unicodeCharacterCount(rendered) <= 3000);
+    assert.doesNotMatch(rendered, /过长标题|QUALIFIED_BUT_OVERSIZED/u);
+    assert.match(rendered, /LEGAL_SIBLING_SUMMARY/u);
     fixture.assertFrozen();
   } finally { await fixture.close(); }
 });

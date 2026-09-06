@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { SnowflakeIdGenerator } from "@codex-memory-os/id-generator";
 import { z } from "zod";
 
-import { AssetSearchService } from "../asset/index.js";
+import { AssetSearchService, AssetSearchUnavailableError } from "../asset/index.js";
 import {
   LoadoutError,
   renderStoredTaskLoadout,
@@ -123,7 +123,7 @@ export async function handleCodexHook(
   if (configuration.databasePath !== ":memory:") {
     await mkdir(dirname(configuration.databasePath), { recursive: true });
   }
-  const repository = new TaskRepository(configuration.databasePath);
+  const repository = new TaskRepository(configuration.databasePath, { busyTimeoutMs: 100 });
   let assetReader: AssetSearchService | undefined;
   try {
     const service = new TaskApplicationService(repository, { idGenerator });
@@ -144,6 +144,7 @@ export async function handleCodexHook(
             }
             assetReader = new AssetSearchService({
               databasePath: configuration.databasePath,
+              busyTimeoutMs: 100,
               repositoryPath: configuration.repositoryPath,
               workspaceConfigPath: configuration.workspaceConfigPath,
               // The independent Hook reads current files; only the main service
@@ -199,8 +200,21 @@ export async function runHookCli(
     }
     return 0;
   } catch (error) {
-    stderr.write(`[${errorCode(error)}] ${errorMessage(error)}\n`);
-    return 2;
+    const known = error instanceof HookError || error instanceof TaskError ||
+      error instanceof WorkspaceResolutionError || error instanceof LoadoutError;
+    const dependency = error instanceof AssetSearchUnavailableError ||
+      (error instanceof Error && "code" in error && typeof error.code === "string" &&
+        ["SQLITE_BUSY", "SQLITE_LOCKED", "SQLITE_CANTOPEN", "SQLITE_NOTADB", "SQLITE_CORRUPT", "ENOENT", "EACCES", "EPERM", "ENOTDIR", "EISDIR"].includes(error.code));
+    const code = known ? errorCode(error) : dependency ? "HOOK_DEPENDENCY_UNAVAILABLE" : "HOOK_INTERNAL_ERROR";
+    try {
+      safeLog(new JsonFileLogger(logPathFromEnvironment(environment)), {
+        error, errorCode: code, event: "HOOK_CONTEXT_UNAVAILABLE", operation: "HOOK_RENDER",
+      });
+    } catch { /* An invalid log path must not replace the original failure. */ }
+    // Knowledge is optional. Never block the user's prompt or expose internal
+    // error details as model context. Unexpected faults remain nonzero failures.
+    stderr.write(`[${code}] CodexMemoryOS context unavailable; prompt may continue.\n`);
+    return known || dependency ? 0 : 1;
   }
 }
 

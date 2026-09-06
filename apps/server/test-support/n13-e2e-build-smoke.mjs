@@ -220,7 +220,7 @@ try {
   const mismatch = await runHook(
     hookInput("mismatch-session", "turn-1", betaWorkspacePath, `taskId: ${taskId}`),
   );
-  assert.equal(mismatch.code, 2);
+  assert.equal(mismatch.code, 0);
   assert.match(mismatch.stderr, /^\[TASK_WORKSPACE_MISMATCH\]/u);
 
   client = await connectClient();

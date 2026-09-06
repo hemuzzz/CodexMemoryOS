@@ -1,6 +1,6 @@
 # CodexMemoryOS
 
-CodexMemoryOS 是一个个人、本地、Codex 专用的知识运行时。Markdown 文件是 Asset 正文来源；`inbox/` 保存待人工确认候选，只有 `assets/` 下的文件才是正式 Asset。SQLite 保存可重建的 Catalog/FTS，以及允许清空的 Task/Usage 运行数据。
+CodexMemoryOS 是一个个人、本地、Codex 专用的知识运行时。Markdown 文件是 Asset 正文来源；`inbox/` 保存待人工确认候选，只有 `assets/` 下的文件才是正式 Asset。SQLite 保存可重建的 Catalog/FTS，以及独立的 Task/Usage 运行数据；索引修复必须保留运行数据。
 
 当前 MVP 提供 Workspace 隔离的 Search/Read、显式 Task Loadout、Usage、只读 Hub/REST、HTTP MCP 和单文件人工确认命令。它不依赖模型 API、MemoryProxy、Obsidian 或团队服务，也不会自动捕获、自动确认或批量确认知识。Hub 只读，不提供确认、编辑、移动或删除操作。
 
@@ -212,6 +212,21 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 \
 
 Codex 会从用户级或受信任项目级配置层读取 Hook；新增或变更的非托管 Hook 需要用户自行检查并信任。参见 [OpenAI Codex Hooks 文档](https://developers.openai.com/codex/hooks)。
 
+知识 Hook 的预期配置、Task/Workspace 和依赖故障返回 exit 0、空 stdout，并向 stderr/本地日志留下诊断；非预期内部故障返回 exit 1 并记录错误。本机 CLI 已验证两者均不阻断 Prompt，知识读取仍拒绝非法资格。Hook 的 Task 连接和纯 Asset 读取连接采用 100ms SQLite busy timeout；这是每次数据库锁等待上限，不是整个文件扫描或 Hook 的总时限。
+
+当前内容超过 3000 Unicode 字符预算时，只对已通过 F01/F02/F03 资格检查的投影降级：DIRECT 改为按需引用，仍超预算则整项省略，极端情况下仅输出可用性提示。不会截断摘要、重写保存的 Loadout、重新 Resolve 或增加 Usage。
+
+## 显式结束 Task
+
+先配置确切的 `CODEX_MEMORY_OS_DATABASE_PATH`，使用现有 Task ID：
+
+```bash
+npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/server task:complete --task-id 'tsk123'
+npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/server task:cancel --task-id 'tsk123'
+```
+
+两者是互斥选择。只有 RUNNING 可以转换到 COMPLETED/CANCELLED；终态重复操作和跨终态转换按既有契约返回 `INVALID_TASK_TRANSITION`，不会重新写入。成功退出 0，失败退出 1，stderr JSON 保留 Task 错误码。命令不创建缺失数据库，不修改 Loadout/Usage/Binding，也不增加 MCP 工具或 Hub 写能力。
+
 ## MCP
 
 Codex 的 Streamable HTTP 配置示例：
@@ -287,26 +302,17 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 \
 - Watcher 不更新：确认修改发生在 `assets/` 的普通 Markdown 或确切 `workspaces.json`，查看 Watcher diagnostics；`inbox/` 本来不会触发正式索引。修复后重启 Server 可执行一次启动全量扫描。
 - Search/Read stale：检查文件仍是合格普通 Markdown、路径与 Frontmatter 一致，再查看 diagnostics；当前读取不会用旧 FTS 正文代替 Markdown。
 
-### 安全重建 SQLite
+### 离线重建派生索引
 
-SQLite 同时含可重建 Catalog/FTS 和可清空的 Task/Usage。重建会永久丢失当前 Task/Usage 历史；先确认这是可接受的恢复边界。
-
-1. 用 SIGINT/SIGTERM 停止 Server，并确认进程已退出。
-2. 从实际环境变量确认精确数据库路径，不要猜测，不要使用目录通配或 `rm -rf`。
-3. 将精确文件移到专用备份目录；不存在的 WAL/SHM 可以跳过。
+`REBUILD_REQUIRED` 应优先修复 Catalog/FTS，不能通过移走整库处理。停掉 Server 和所有使用同一数据库的 Hook/写进程后，保留原有三条绝对路径配置，执行：
 
 ```bash
-codex_memory_database='/absolute/runtime/codex-memory.sqlite'
-codex_memory_backup='/absolute/backup/codex-memory-rebuild'
-mkdir -p "$codex_memory_backup"
-ls -l "$codex_memory_database" "$codex_memory_database-wal" "$codex_memory_database-shm"
-mv "$codex_memory_database" "$codex_memory_backup/codex-memory.sqlite"
-[ ! -e "$codex_memory_database-wal" ] || mv "$codex_memory_database-wal" "$codex_memory_backup/codex-memory.sqlite-wal"
-[ ! -e "$codex_memory_database-shm" ] || mv "$codex_memory_database-shm" "$codex_memory_backup/codex-memory.sqlite-shm"
+npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/server rebuild-index --offline
 ```
 
-4. 重新启动 Server。启动扫描会从正式 Markdown 重建 Catalog/FTS；旧 Task/Usage 不会恢复。
-5. 验证 `/health`、`/api/system/status`、Search/Read 后再决定是否保留备份。
+`--offline` 是操作人确认所有写进程已停止；命令不会停止进程，也不证明不存在其他空闲写进程。命令先获得完整 Scanner Snapshot，再打开已存在数据库，在单个 EXCLUSIVE 事务里重建 Catalog/FTS 及其索引，保留 Task、Loadout、Binding、Usage 和其他非派生表。失败回滚并退出 1；不完整扫描、缺失/损坏数据库或锁冲突不会被伪装成空库成功。成功退出 0 后重新启动 Server，检查 `/api/system/status` READY 和实际 Search/Read。服务启动会等待 Watcher ready 后再完整复核一次，才对外报告 READY。
+
+**数据库整体丢失或文件损坏是另一种恢复边界。** 本命令不能恢复 Task/Usage，也不自动新建整库、覆盖备份或执行重置。只能在另行明确接受运行历史损失后安排整库恢复，不能以这种方式代替派生索引修复。
 
 ### HTTP、MCP、Vite 和确认命令
 
@@ -322,10 +328,13 @@ mv "$codex_memory_database" "$codex_memory_backup/codex-memory.sqlite"
 ## 已知边界
 
 - 只验证目标 macOS ARM 本机环境；网络文件系统、其他操作系统和其他架构未验证。
+- ID 保留 `ast/tsk/usg` 加十进制数字的字符串契约，兼容旧 ID；新 ID 在 Snowflake 后组合 128 位随机量，避免多个独立进程固定 node=0、同毫秒同序列的确定性冲突。长度增加，不应转为 JavaScript Number；随机碰撞概率极低但不构成绝对唯一证明，SQLite 唯一约束继续保留。
 - Loadout 的 `200/300` 分数阈值、`3000` Unicode 字符和最多 `8` 个 Asset 只完成确定性 fixture 消融，不是长期质量结论。
 - Task 终态不从 Stop、Interrupt 或 SessionEnd 自动推导。
 - 不自动捕获、确认、批量移动或长期评估知识。
 - Hub 与七个 REST API 只读；MCP 只有 Usage 和显式 Loadout Resolve 的受限写入。
 - M00～M05 旧知识人工整理尚未开始；只验证了合成 M03/M04 接入契约，没有读取或迁移正式旧知识。
+- N13 的 `scenarioAssumptions.estimatedExplicitReads` 是场景假设，不是实际 Read 次数测量，也不证明质量提升。
+- 本轮真实 Codex CLI 使用隔离配置和脚本化本地 Responses 端点验证 Hook/MCP；没有调用真实模型或验收 Desktop 人工信任/多窗口。
 - 没有正式长期数据验收，也没有修改用户全局 Codex/MCP/Hook 配置。
 - N12 在源删除后若遭遇命令外部的目标破坏，需要人工核对，不提供恢复平台或分布式锁。

@@ -19,6 +19,7 @@ import { LoadoutAssetProjectionRepository } from "./projection-repository.js";
 import {
   renderLoadoutAssetForHook,
   renderLoadoutForHook,
+  renderQualifiedLoadoutWithinBudget,
   unicodeCharacterCount,
   type LoadoutAssetMetadata,
 } from "./renderer.js";
@@ -284,7 +285,7 @@ export async function renderStoredTaskLoadout(
       ? { ...asset, mode: "ON_DEMAND" }
       : asset);
   }
-  return renderLoadoutForHook({
+  return renderQualifiedLoadoutWithinBudget({
     assetMetadata: metadata,
     loadout: { ...loadout, assets: projectedAssets },
     status: task.status,

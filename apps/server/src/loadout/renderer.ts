@@ -61,3 +61,20 @@ export function renderLoadoutForHook(input: LoadoutRenderInput): string {
   }
   return rendered;
 }
+
+/** Budget only already-qualified data; keep the saved Loadout untouched. */
+export function renderQualifiedLoadoutWithinBudget(input: LoadoutRenderInput): string {
+  const tryRender = (assets: TaskLoadoutAsset[]): string | undefined => {
+    try { return renderLoadoutForHook({ ...input, loadout: { ...input.loadout, assets } }); }
+    catch (error) { if (!(error instanceof LoadoutRenderError)) throw error; return undefined; }
+  };
+  const full = tryRender(input.loadout.assets);
+  if (full !== undefined) return full;
+  const retained: TaskLoadoutAsset[] = [];
+  for (const asset of input.loadout.assets) {
+    if (tryRender([...retained, asset]) !== undefined) { retained.push(asset); continue; }
+    const reference: TaskLoadoutAsset = { ...asset, mode: "ON_DEMAND" };
+    if (asset.mode === "DIRECT" && tryRender([...retained, reference]) !== undefined) retained.push(reference);
+  }
+  return tryRender(retained) ?? "CodexMemoryOS: qualified knowledge omitted because the context budget is unavailable.";
+}

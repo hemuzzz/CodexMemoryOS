@@ -569,8 +569,7 @@ interface AblationMetrics {
   hookVisibleAssetIds: number;
   hookVisibleUniqueDecisionTokens: number;
   loadoutAssets: number;
-  modeReasonsValid: boolean;
-  needsAssetRead: number;
+  scenarioAssumptions: { estimatedExplicitReads: number };
   overCharacterLimit: boolean;
   overLoadoutLimit: boolean;
   stableAssetOrder: string[];
@@ -692,22 +691,21 @@ function ablationMetrics(
   hookText: string,
   hookVisibleAssetIds: number,
   hookVisibleUniqueDecisionTokens: number,
-  needsAssetRead: number,
+  estimatedExplicitReads: number,
   loadoutAssets: number,
 ): AblationMetrics {
   return {
     variant,
     expectedCoverage: searchItems.length,
-    workspaceLeakage: 0,
+    workspaceLeakage: searchItems.filter(item => item.scope === "WORKSPACE" && item.workspace !== "alpha").length,
     stableAssetOrder: searchItems.map(({ assetId }) => assetId),
     hookVisibleAssetIds,
     hookVisibleUniqueDecisionTokens,
-    needsAssetRead,
+    scenarioAssumptions: { estimatedExplicitReads },
     loadoutAssets,
     hookTextCharacters: unicodeCharacterCount(hookText),
     overCharacterLimit: unicodeCharacterCount(hookText) > DEFAULT_LOADOUT_POLICY.maxInjectedCharacters,
     overLoadoutLimit: loadoutAssets > DEFAULT_LOADOUT_POLICY.maxAssets,
-    modeReasonsValid: true,
   };
 }
 

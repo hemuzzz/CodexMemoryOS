@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 export const LOG_PATH_ENV = "CODEX_MEMORY_OS_LOG_PATH";
 
 export type StructuredLogEvent =
+  | "HOOK_CONTEXT_UNAVAILABLE"
   | "LOADOUT_RENDER_FAILED"
   | "LOADOUT_RESOLVE_FAILED"
   | "USAGE_READ_WRITE_FAILED"
@@ -18,7 +19,7 @@ export interface StructuredErrorLogInput {
   errorCode: string;
   event: StructuredLogEvent;
   operation: string;
-  taskId: string;
+  taskId?: string;
 }
 
 export interface StructuredLogger {

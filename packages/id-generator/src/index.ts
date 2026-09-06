@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { generateId as generateSnowflakeId, type SnowflakeOptions } from "snowflake.io";
 
 export const ID_PREFIXES = ["ast", "tsk", "usg"] as const;
@@ -18,7 +19,12 @@ const SNOWFLAKE_OPTIONS = {
 
 export class SnowflakeIdGenerator implements IdGenerator {
   next(prefix: IdPrefix): string {
-    return `${prefix}${generateSnowflakeId(SNOWFLAKE_OPTIONS)}`;
+    // Snowflake's fixed node and sequence are process-local. Independent Hooks
+    // can share the same timestamp/sequence; keep 128 random bits per ID so they
+    // do not depend on coordinating node IDs. Preserve decimal string storage.
+    const snowflake = generateSnowflakeId(SNOWFLAKE_OPTIONS);
+    const nonce = BigInt(`0x${randomBytes(16).toString("hex")}`);
+    return `${prefix}${(BigInt(snowflake) << 128n) | nonce}`;
   }
 
   validate(id: string, expectedPrefix?: IdPrefix): boolean {
@@ -29,4 +35,3 @@ export class SnowflakeIdGenerator implements IdGenerator {
     return expectedPrefix === undefined || id.startsWith(expectedPrefix);
   }
 }
-

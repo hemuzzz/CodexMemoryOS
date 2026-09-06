@@ -109,11 +109,13 @@ export interface TaskLoadoutUpdate {
 export class TaskRepository {
   readonly #database: Database.Database;
 
-  constructor(databasePath: string) {
-    this.#database = new Database(databasePath);
+  constructor(databasePath: string, options: { busyTimeoutMs?: number } = {}) {
+    const busyTimeoutMs = options.busyTimeoutMs ?? 5000;
+    if (!Number.isSafeInteger(busyTimeoutMs) || busyTimeoutMs < 0) throw new TaskSchemaError("Invalid SQLite busy timeout");
+    this.#database = new Database(databasePath, { timeout: busyTimeoutMs });
 
     try {
-      this.#database.pragma("busy_timeout = 5000");
+      this.#database.pragma(`busy_timeout = ${busyTimeoutMs}`);
       this.#database.pragma("foreign_keys = ON");
       if (!this.foreignKeysEnabled()) {
         throw new TaskSchemaError("SQLite foreign_keys could not be enabled for the Task connection");

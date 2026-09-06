@@ -18,7 +18,11 @@
     "start": "node dist/main.js",
     "smoke:rest:build": "node test-support/rest-build-smoke.mjs",
     "test": "tsx --test --test-concurrency=1 test/*.test.ts",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "rebuild-index": "node dist/maintenance-cli.js rebuild-index",
+    "task:complete": "node dist/maintenance-cli.js complete",
+    "task:cancel": "node dist/maintenance-cli.js cancel",
+    "smoke:codex:build": "node test-support/codex-client-build-smoke.mjs"
   },
   "dependencies": {
     "@codex-memory-os/id-generator": "workspace:*",

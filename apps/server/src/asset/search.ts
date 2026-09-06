@@ -93,6 +93,7 @@ export interface AssetSearchDiagnostic {
 export interface AssetSearchServiceOptions extends AssetScanOptions {
   databasePath: string;
   refreshIndex: () => Promise<unknown>;
+  busyTimeoutMs?: number;
 }
 
 interface CatalogCandidate {
@@ -197,7 +198,7 @@ export class AssetSearchService {
   #diagnostics: AssetSearchDiagnostic[] = [];
 
   constructor(options: AssetSearchServiceOptions) {
-    this.#database = new Database(options.databasePath, { fileMustExist: true, readonly: true });
+    this.#database = new Database(options.databasePath, { fileMustExist: true, readonly: true, timeout: options.busyTimeoutMs ?? 5000 });
     this.#refreshIndex = options.refreshIndex;
     this.#scanOptions = {
       repositoryPath: options.repositoryPath,

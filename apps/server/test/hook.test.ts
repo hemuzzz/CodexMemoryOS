@@ -234,7 +234,7 @@ test("N06 Hook supports explicit cross-Session taskId attach and exact Workspace
       },
       fixture,
     );
-    assert.equal(mismatched.code, 2);
+    assert.equal(mismatched.code, 0);
     assert.match(mismatched.stderr, /^\[TASK_WORKSPACE_MISMATCH\]/);
     assert.equal(mismatched.stdout, "");
 
@@ -248,7 +248,7 @@ test("N06 Hook supports explicit cross-Session taskId attach and exact Workspace
       },
       fixture,
     );
-    assert.equal(invalid.code, 2);
+    assert.equal(invalid.code, 0);
     assert.match(invalid.stderr, /^\[HOOK_TASK_ID_INVALID\]/);
 
     const database = new Database(fixture.databasePath, { readonly: true });
@@ -263,11 +263,11 @@ test("N06 Hook supports explicit cross-Session taskId attach and exact Workspace
   }
 });
 
-test("N06 Hook returns exit 2 with clear diagnostics for malformed input and invalid Workspace config", async () => {
+test("F05 Hook returns nonblocking exit 0 with clear diagnostics for malformed input and invalid Workspace config", async () => {
   const fixture = await createFixture();
   try {
     const malformed = await runHookSource("{not-json", fixture);
-    assert.equal(malformed.code, 2);
+    assert.equal(malformed.code, 0);
     assert.match(malformed.stderr, /^\[HOOK_INPUT_INVALID\]/);
     assert.equal(malformed.stdout, "");
 
@@ -282,7 +282,7 @@ test("N06 Hook returns exit 2 with clear diagnostics for malformed input and inv
       },
       fixture,
     );
-    assert.equal(invalidConfig.code, 2);
+    assert.equal(invalidConfig.code, 0);
     assert.match(invalidConfig.stderr, /^\[WORKSPACE_CONFIG_INVALID\]/);
     assert.equal(invalidConfig.stdout, "");
     await assert.rejects(() => readText(fixture.databasePath));

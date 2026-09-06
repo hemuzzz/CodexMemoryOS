@@ -444,7 +444,7 @@ test("debounces Markdown events and watches workspaces.json deletion and reappea
     const started = await manager.start();
     assert.equal(started.indexState, "READY");
     assert.equal(started.watcherState, "RUNNING");
-    assert.equal(scanCount, 1);
+    assert.equal(scanCount, 2);
 
     await Promise.all(
       [0, 1, 2].map((index) =>
@@ -457,7 +457,7 @@ test("debounces Markdown events and watches workspaces.json deletion and reappea
     );
     await waitFor(() => manager.status().catalogCount === 5);
     await delay(240);
-    assert.equal(scanCount, 2);
+    assert.equal(scanCount, 3);
 
     await rm(fixture.workspaceConfigPath);
     await waitFor(() => manager.status().indexState === "DEGRADED");

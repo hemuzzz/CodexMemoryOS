@@ -93,9 +93,11 @@ export class AssetCatalog {
   readonly #database: Database.Database;
   #rebuildReason: string | null = null;
 
-  constructor(databasePath: string) {
-    this.#database = new Database(databasePath);
-    this.#initializeSchema();
+  constructor(databasePath: string, options: { maintenance?: boolean } = {}) {
+    this.#database = new Database(databasePath, options.maintenance ? { fileMustExist: true, timeout: 100 } : {});
+    // Offline repair must reach broken derived schemas, without initializing or
+    // changing any schema before rebuild's transaction starts.
+    if (!options.maintenance) this.#initializeSchema();
   }
 
   get rebuildReason(): string | null {
@@ -141,7 +143,7 @@ export class AssetCatalog {
       this.#insertAssets(assets, indexedAt);
     });
 
-    rebuild();
+    rebuild.exclusive();
     this.#rebuildReason = null;
     this.#assertConsistent();
 

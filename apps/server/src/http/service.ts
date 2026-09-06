@@ -2,6 +2,7 @@ import { isAbsolute, relative, resolve, win32 } from "node:path";
 
 import MarkdownIt from "markdown-it";
 
+import type { AssetDiffService } from "../asset/content-diff.js";
 import {
   AssetSearchService,
   InboxApplicationService,
@@ -48,7 +49,13 @@ export class HubAssetApplicationService {
     readonly assetSearchService: Pick<AssetSearchService, "listLibrary" | "readLibrary">,
     readonly loadoutService: Pick<TaskLoadoutApplicationService, "recentByAsset">,
     readonly usageService: Pick<UsageApplicationService, "summarizeByAsset">,
+    readonly diffService?: AssetDiffService,
   ) {}
+
+  async diff(assetId: string) {
+    if (!this.diffService) throw new Error("Content version service is unavailable");
+    return this.diffService.get(assetId);
+  }
 
   list(query: AssetLibraryListQuery): Promise<AssetLibraryItem[]> {
     return this.assetSearchService.listLibrary(query);

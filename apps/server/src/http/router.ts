@@ -39,6 +39,7 @@ import {
 
 const KNOWN_API_PATHS = [
   /^\/api\/assets$/u,
+  /^\/api\/assets\/[^/]+\/diff$/u,
   /^\/api\/assets\/[^/]+$/u,
   /^\/api\/inbox$/u,
   /^\/api\/task-loadouts$/u,
@@ -104,6 +105,13 @@ export function createRestApiApp(dependencies: RestApiDependencies): Hono {
     assertIndexReady(dependencies.indexStatus());
     const path = parsePath(assetPathSchema, { assetId: context.req.param("assetId") }, "ASSET_ID_INVALID");
     return success(context, { asset: await dependencies.assetService.get(path.assetId) });
+  });
+
+  app.get("/api/assets/:assetId/diff", async (context) => {
+    parseStrictQuery(context, [], z.object({}).strict());
+    assertIndexReady(dependencies.indexStatus());
+    const path = parsePath(assetPathSchema, { assetId: context.req.param("assetId") }, "ASSET_ID_INVALID");
+    return success(context, { diff: await dependencies.assetService.diff(path.assetId) });
   });
 
   app.get("/api/inbox", async (context) => {

@@ -18,9 +18,16 @@ import {
   type ScannedAsset,
 } from "./scanner.js";
 
+import { confirmVersionedInboxAsset } from "./versioned-confirmation.js";
+
 export const CONTENT_HASH_PATTERN = /^[0-9a-f]{64}$/u;
 
 export type AssetConfirmationErrorCode =
+  | "CONFIRM_BUSY"
+  | "CONFIRM_PARTIAL_WRITE"
+  | "CONFIRM_RECOVERY_REQUIRED"
+  | "BASELINE_MISMATCH"
+  | "UPDATE_ASSET_INVALID"
   | "ASSET_COPY_FAILED"
   | "ASSET_ID_CONFLICT"
   | "CONFIRM_CONFIGURATION_INVALID"
@@ -34,6 +41,8 @@ export type AssetConfirmationErrorCode =
   | "TARGET_ALREADY_EXISTS";
 
 export interface AssetConfirmationInput {
+  updateAssetId?: string;
+  expectedBaselineHash?: string;
   expectedContentHash: string;
   relativePath: string;
 }
@@ -52,6 +61,8 @@ export interface AssetConfirmationFileOperations {
 }
 
 export interface AssetConfirmationOptions extends AssetScanOptions {
+  databasePath: string;
+  checkpoint?: (stage: "prepared" | "file-written" | "database-committed") => Promise<void>;
   fileOperations?: Partial<AssetConfirmationFileOperations>;
 }
 
@@ -81,6 +92,14 @@ const DEFAULT_FILE_OPERATIONS: AssetConfirmationFileOperations = {
 };
 
 export async function confirmInboxAsset(
+  input: AssetConfirmationInput,
+  options: AssetConfirmationOptions,
+): Promise<AssetConfirmationResult> {
+  return confirmVersionedInboxAsset(input, options);
+}
+
+// Internal new-file primitive; the public entry always coordinates durable versions.
+export async function moveNewInboxAsset(
   input: AssetConfirmationInput,
   options: AssetConfirmationOptions,
 ): Promise<AssetConfirmationResult> {
@@ -307,7 +326,7 @@ function isTypeDirectory(value: string | undefined): boolean {
   return value === "memories" || value === "documents" || value === "skills";
 }
 
-function assertExpectedContentHash(contentHash: string, relativePath: string): void {
+export function assertExpectedContentHash(contentHash: string, relativePath: string): void {
   if (typeof contentHash !== "string" || !CONTENT_HASH_PATTERN.test(contentHash)) {
     throw new AssetConfirmationError(
       "CONFIRM_INPUT_INVALID",
@@ -317,7 +336,7 @@ function assertExpectedContentHash(contentHash: string, relativePath: string): v
   }
 }
 
-function assertConfiguration(options: AssetScanOptions): void {
+export function assertConfiguration(options: AssetScanOptions): void {
   if (
     !isAllowedAbsolutePath(options.repositoryPath) ||
     !isAllowedAbsolutePath(options.workspaceConfigPath)
@@ -333,7 +352,7 @@ function isAllowedAbsolutePath(path: string): boolean {
   return typeof path === "string" && path.length > 0 && (isAbsolute(path) || win32.isAbsolute(path));
 }
 
-async function scanInbox(options: AssetScanOptions): Promise<AssetScanResult> {
+export async function scanInbox(options: AssetScanOptions): Promise<AssetScanResult> {
   let result: AssetScanResult;
   try {
     result = await scanInboxRepository(options);
@@ -352,7 +371,7 @@ async function scanInbox(options: AssetScanOptions): Promise<AssetScanResult> {
   return result;
 }
 
-async function scanFormalAssets(options: AssetScanOptions): Promise<AssetScanResult> {
+export async function scanFormalAssets(options: AssetScanOptions): Promise<AssetScanResult> {
   let result: AssetScanResult;
   try {
     result = await scanAssetRepository(options);
@@ -371,7 +390,7 @@ async function scanFormalAssets(options: AssetScanOptions): Promise<AssetScanRes
   return result;
 }
 
-function requireEligibleInboxAsset(scan: AssetScanResult, relativePath: string): ScannedAsset {
+export function requireEligibleInboxAsset(scan: AssetScanResult, relativePath: string): ScannedAsset {
   const asset = scan.assets.find((item) => item.relativePath === relativePath);
   if (asset !== undefined) {
     return asset;
@@ -390,7 +409,7 @@ function requireEligibleInboxAsset(scan: AssetScanResult, relativePath: string):
   );
 }
 
-function assertNoFormalIdConflict(
+export function assertNoFormalIdConflict(
   scan: AssetScanResult,
   assetId: string,
   relativePath: string,
@@ -439,7 +458,7 @@ async function requireValidFormalTarget(
   }
 }
 
-async function assertTargetAbsent(targetPath: string, targetRelativePath: string): Promise<void> {
+export async function assertTargetAbsent(targetPath: string, targetRelativePath: string): Promise<void> {
   try {
     await lstat(targetPath);
   } catch (error) {

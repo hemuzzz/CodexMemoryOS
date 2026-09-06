@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { getRequestListener } from "@hono/node-server";
 import { SnowflakeIdGenerator } from "@codex-memory-os/id-generator";
 
+import { AssetContentVersionRepository } from "./asset/content-version.js";
+import { AssetDiffService } from "./asset/content-diff.js";
 import { createApp } from "./app.js";
 import {
   AssetIndexManager,
@@ -103,6 +105,7 @@ export async function startCodexMemoryOsServer(
     repositoryPath: configuration.assetRepositoryPath,
     workspaceConfigPath: configuration.workspaceConfigPath,
   });
+  let contentVersions: AssetContentVersionRepository | undefined;
   let taskRepository: TaskRepository | undefined;
   let usageRepository: UsageRepository | undefined;
   let assetProjection: LoadoutAssetProjectionRepository | undefined;
@@ -111,6 +114,7 @@ export async function startCodexMemoryOsServer(
 
   try {
     await indexManager.start();
+    contentVersions = new AssetContentVersionRepository(configuration.databasePath);
     taskRepository = new TaskRepository(configuration.databasePath);
     const idGenerator = new SnowflakeIdGenerator();
     const taskService = new TaskApplicationService(taskRepository, { idGenerator });
@@ -151,6 +155,7 @@ export async function startCodexMemoryOsServer(
       assetSearchService,
       loadoutService,
       usageService,
+      new AssetDiffService(assetSearchService, contentVersions),
     );
     const systemStatusService = new SystemStatusApplicationService({
       repositoryPath: configuration.assetRepositoryPath,
@@ -200,6 +205,7 @@ export async function startCodexMemoryOsServer(
         }
         closed = true;
         await closeServer(runningServer);
+        contentVersions?.close();
         assetSearchService?.close();
         assetProjection?.close();
         usageRepository?.close();
@@ -211,6 +217,7 @@ export async function startCodexMemoryOsServer(
     if (server !== undefined) {
       await closeServer(server);
     }
+    contentVersions?.close();
     assetSearchService?.close();
     assetProjection?.close();
     usageRepository?.close();

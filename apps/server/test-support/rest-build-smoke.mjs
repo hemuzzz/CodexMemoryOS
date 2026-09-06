@@ -94,6 +94,9 @@ try {
   assert.match(detail.data.asset.rawMarkdown, /compiled-rest-token/);
   assert.match(detail.data.asset.renderedMarkdown, /<p>compiled-rest-token<\/p>/);
 
+  const diff = await fetch(`http://127.0.0.1:${port}/api/assets/${assetId}/diff`).then(response => response.json());
+  assert.deepEqual(diff, { ok: true, data: { diff: { assetId, status: "UNTRACKED" } } });
+
   const rejectedWrite = await fetch(`http://127.0.0.1:${port}/api/assets`, { method: "POST" });
   assert.equal(rejectedWrite.status, 405);
   assert.equal((await rejectedWrite.json()).error.code, "METHOD_NOT_ALLOWED");

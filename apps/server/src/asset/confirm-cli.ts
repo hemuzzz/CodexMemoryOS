@@ -49,7 +49,7 @@ export async function runAssetConfirmationCli(
 export function parseArguments(args: readonly string[]): AssetConfirmationInput {
   const commandArguments = args[0] === "--" ? args.slice(1) : args;
   const values = new Map<string, string>();
-  const allowed = new Set(["--relative-path", "--expected-content-hash"]);
+  const allowed = new Set(["--relative-path", "--expected-content-hash", "--update-asset-id", "--expected-baseline-hash"]);
 
   for (let index = 0; index < commandArguments.length; index += 2) {
     const name = commandArguments[index];
@@ -71,22 +71,30 @@ export function parseArguments(args: readonly string[]): AssetConfirmationInput 
 
   const relativePath = values.get("--relative-path");
   const expectedContentHash = values.get("--expected-content-hash");
-  if (values.size !== 2 || relativePath === undefined || expectedContentHash === undefined) {
+  if (![2, 4].includes(values.size) || relativePath === undefined || expectedContentHash === undefined) {
     throw new AssetConfirmationError(
       "CONFIRM_INPUT_INVALID",
       "Exactly one --relative-path and one --expected-content-hash are required",
     );
   }
-  return { expectedContentHash, relativePath };
+  const updateAssetId = values.get("--update-asset-id");
+  const expectedBaselineHash = values.get("--expected-baseline-hash");
+  if ((updateAssetId === undefined) !== (expectedBaselineHash === undefined)) {
+    throw new AssetConfirmationError("CONFIRM_INPUT_INVALID", "Update requires both --update-asset-id and --expected-baseline-hash");
+  }
+  return { expectedContentHash, relativePath, ...(updateAssetId === undefined ? {} : { updateAssetId, expectedBaselineHash: expectedBaselineHash! }) };
 }
 
 function configurationFromEnvironment(environment: NodeJS.ProcessEnv): {
+  databasePath: string;
   repositoryPath: string;
   workspaceConfigPath: string;
 } {
+  const databasePath = environment.CODEX_MEMORY_OS_DATABASE_PATH;
   const repositoryPath = environment[CONFIRM_ASSET_REPOSITORY_PATH_ENV];
   const workspaceConfigPath = environment[CONFIRM_WORKSPACE_CONFIG_PATH_ENV];
   if (
+    databasePath === undefined || !isAllowedAbsolutePath(databasePath) ||
     repositoryPath === undefined ||
     workspaceConfigPath === undefined ||
     !isAllowedAbsolutePath(repositoryPath) ||
@@ -94,14 +102,15 @@ function configurationFromEnvironment(environment: NodeJS.ProcessEnv): {
   ) {
     throw new AssetConfirmationError(
       "CONFIRM_CONFIGURATION_INVALID",
-      `${CONFIRM_ASSET_REPOSITORY_PATH_ENV} and ${CONFIRM_WORKSPACE_CONFIG_PATH_ENV} must be absolute paths`,
+      `${CONFIRM_ASSET_REPOSITORY_PATH_ENV}, ${CONFIRM_WORKSPACE_CONFIG_PATH_ENV}, and CODEX_MEMORY_OS_DATABASE_PATH must be absolute paths`,
     );
   }
-  return { repositoryPath, workspaceConfigPath };
+  return { databasePath, repositoryPath, workspaceConfigPath };
 }
 
 function operationalFailure(code: AssetConfirmationError["code"]): boolean {
   return (
+    code === "CONFIRM_BUSY" || code === "CONFIRM_PARTIAL_WRITE" || code === "CONFIRM_RECOVERY_REQUIRED" ||
     code === "ASSET_COPY_FAILED" ||
     code === "POST_MOVE_VALIDATION_FAILED" ||
     code === "SOURCE_REMOVE_FAILED"

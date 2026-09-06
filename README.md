@@ -1,6 +1,8 @@
 # CodexMemoryOS
 
-CodexMemoryOS 是一个个人、本地、Codex 专用的知识运行时。Markdown 文件是 Asset 正文来源；`inbox/` 保存待人工确认候选，只有 `assets/` 下的文件才是正式 Asset。SQLite 保存可重建的 Catalog/FTS，以及独立的 Task/Usage 运行数据；索引修复必须保留运行数据。
+CodexMemoryOS 是一个个人、本地、Codex 专用的知识运行时。Markdown 文件是 Asset 正文来源；`inbox/` 保存待人工确认候选，只有 `assets/` 下的文件才是正式 Asset。SQLite 保存可重建的 Catalog/FTS、Task/Usage/Loadout 运行数据，以及不可从当前 Markdown 重建的 CURRENT/PREVIOUS 内容快照；索引修复必须保留运行数据和内容快照。
+
+Native Memories 提供客户端历史背景，本服务维护经人工确认、需要明确维护的工程知识；两者各自参与任务，不自动同步会话摘要、不扫描 Native 存储、不合并计数。始终适用的指导放在 AGENTS.md 或版本化文档。知识正文与模板统一见 [知识内容模型](工程约定/知识内容模型.md)。
 
 当前 MVP 提供 Workspace 隔离的 Search/Read、显式 Task Loadout、Usage、只读 Hub/REST、HTTP MCP 和单文件人工确认命令。它不依赖模型 API、MemoryProxy、Obsidian 或团队服务，也不会自动捕获、自动确认或批量确认知识。Hub 只读，不提供确认、编辑、移动或删除操作。
 
@@ -113,13 +115,13 @@ shasum -a 256 '/absolute/asset-repository/inbox/workspaces/example-project/memor
 | 环境变量 | 使用方 | 含义 |
 |---|---|---|
 | `CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH` | Server、Hook、`asset:confirm` | Asset Repository 绝对路径；Hook 投影非空 Loadout 时必须配置 |
-| `CODEX_MEMORY_OS_DATABASE_PATH` | Server、Hook | SQLite 绝对路径 |
+| `CODEX_MEMORY_OS_DATABASE_PATH` | Server、Hook、`asset:confirm` | SQLite 绝对路径 |
 | `CODEX_MEMORY_OS_WORKSPACES_PATH` | Server、Hook、`asset:confirm` | `workspaces.json` 绝对路径 |
 | `CODEX_MEMORY_OS_LOG_PATH` | Server、Hook | 日志文件；建议显式配置绝对路径 |
 | `PORT` | Node Server | 监听端口，默认 `3000` |
 | `CODEX_MEMORY_OS_SERVER_PORT` | Vite 开发服务器 | `/api` 代理目标端口，默认 `3000`；不改变 Node Server 端口 |
 
-Server 的 Asset Repository、SQLite 和 Workspace 配置三条核心路径必须是绝对路径。`asset:confirm` 只需要 Asset Repository 与 Workspace 配置，不需要 SQLite。
+Server 的 Asset Repository、SQLite 和 Workspace 配置三条核心路径必须是绝对路径。`asset:confirm` 同样需要这三条核心路径，以登记已确认内容快照。
 
 以下示例仅使用占位绝对路径：
 
@@ -258,6 +260,7 @@ MCP 参数不能覆盖 Workspace，也不能提交任意路径。`task_loadout_r
 
 ```bash
 CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH='/absolute/asset-repository' \
+CODEX_MEMORY_OS_DATABASE_PATH='/absolute/data/codex-memory.sqlite' \
 CODEX_MEMORY_OS_WORKSPACES_PATH='/absolute/workspaces.json' \
 npx -y -p node@22.16.0 -p pnpm@11.1.3 \
   pnpm --filter @codex-memory-os/server asset:confirm -- \
@@ -265,7 +268,7 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 \
   --expected-content-hash '<64位小写sha256>'
 ```
 
-命令只接受 Inbox 源路径和必填 Hash，不接受目标路径。目标由 `inbox/...` 机械映射到 `assets/...`；使用 no-clobber 复制，不覆盖已有目标，并在删除源前后复核实际字节和 Scanner 资格。
+新增命令接受 Inbox 源路径和必填 Hash，不接受目标路径。目标由 `inbox/...` 机械映射到 `assets/...`；使用 no-clobber 复制，不覆盖已有目标，并在删除源前后复核实际字节和 Scanner 资格。
 
 成功退出码为 `0`，stdout 为稳定 JSON：
 
@@ -281,7 +284,15 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 \
 
 输入、Hash、资格、ID 或目标冲突等安全拒绝退出 `2`；复制、源删除或移动后校验等运行失败退出 `1`。stderr JSON 的 `error.code` 是稳定判定字段，包括 `CONTENT_HASH_MISMATCH`、`TARGET_ALREADY_EXISTS`、`ASSET_ID_CONFLICT`、`SOURCE_REMOVE_FAILED` 和 `POST_MOVE_VALIDATION_FAILED`。
 
-源删除前失败时，命令只清理由本次创建且身份未变的目标，保留源。若源已删除后目标被命令外部修改或删除，命令会报 `POST_MOVE_VALIDATION_FAILED`，不会自动重建源；按返回的两个仓库相对路径人工核对，不要盲目重试。
+更新已有内容时，在上述命令后增加 `--update-asset-id '<ast ID>' --expected-baseline-hash '<正式文件当前 SHA-256>'`。须先人工查看完整新稿和差异，确认新稿 Hash 与正式基线 Hash。候选保持同 ID、同类型、同 Scope/Workspace、同文件相对路径（仅根从 assets 换为 inbox）；更新目标从合法正式 Asset 解析。普通 Inbox 列表仍排除同 ID 冲突，不自动把新增变成覆盖。未登记基线的旧 Asset 不能直接通过更新命令初始化。
+
+确认需要同一仓库的各进程配置同一数据库。新增只写 CURRENT；更新 A→B→C 后仅保留 B/C，时间随原 CURRENT 一起转为 PREVIOUS；无变化及已完成调用重试不再轮换。SQLite 写锁忙返回 `CONFIRM_BUSY`。`BASELINE_MISMATCH` 表示正式文件或 CURRENT 已偏离确认基线，需重新核对，不能复用旧确认。
+
+`CONFIRM_PARTIAL_WRITE` 表示操作可能部分生效，仓库根 `.asset-confirm-recovery.json` 保留原字节及输入身份。先检查正式文件、CURRENT 和候选；仅用完全相同的路径、Asset ID 和两侧 Hash 重试，程序会按身份补完或识别已完成，不盲目轮换。恢复材料损坏、调用不符或后来内容改变时停止并报 `CONFIRM_RECOVERY_REQUIRED` 或 `CONFIRM_PARTIAL_WRITE`，不覆盖后来编辑。勿手工清空恢复文件来绕过诊断。只有可证明尚未生效的失败才清理本次恢复材料。
+
+`GET /api/assets/:assetId/diff` 是 Hub 个人本地只读接口，成功外壳为 `{ok:true,data:{diff:...}}`。两版可比较时 `status=AVAILABLE`，返回 Hash、时间、BOM 标记和完整行级 hunks；当前资格拒绝沿用详情错误。其他状态包括 `UNTRACKED`、`NO_PREVIOUS_VERSION`、`CONTENT_MISMATCH`、`UNSUPPORTED_ENCODING` 及 INPUT/WORK/OUTPUT_LIMIT_EXCEEDED，不返回部分 hunks 或假称无变化。接口不接受路径、Git ref 或历史版本参数，不增加 MCP 工具，不写 Usage；前端适配留待整体重做。
+
+备份应在停止 Server、Hook 写入及确认操作后，同时保存 Markdown、SQLite 及尚存的恢复材料；若启用了 SQLite WAL，也要使用一致的 SQLite 备份方式而非遗漏 WAL 的文件复制。CURRENT/PREVIOUS 是持久数据，重建索引不能恢复 PREVIOUS。丢库后不自动补造历史；旧 Asset 读取继续可用、Diff 保持 UNTRACKED，真实基线采集另行授权。直接编辑正式文件仍生效，但不自动登记版本，Diff 会报告与最近一次 confirm 快照不一致。
 
 ## 排错
 

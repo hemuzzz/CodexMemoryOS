@@ -7,6 +7,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { AssetContentVersionRepository } from "../dist/asset/content-version.js";
+
 const execFileAsync = promisify(execFile);
 const serverRoot = fileURLToPath(new URL("..", import.meta.url));
 const fixtureRoot = await mkdtemp(join(tmpdir(), "codex-memory-os-n12-build-"));
@@ -57,6 +59,7 @@ try {
         ...process.env,
         CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH: repositoryPath,
         CODEX_MEMORY_OS_WORKSPACES_PATH: workspaceConfigPath,
+        CODEX_MEMORY_OS_DATABASE_PATH: join(fixtureRoot, "confirm.sqlite"),
       },
     },
   );
@@ -71,6 +74,21 @@ try {
   });
   assert.deepEqual(await readFile(join(repositoryPath, targetRelativePath)), source);
   await assert.rejects(readFile(join(repositoryPath, sourceRelativePath)), { code: "ENOENT" });
+  const next = Buffer.from(source.toString().replace("compiled-confirmation-token", "updated-confirmation-token"));
+  const nextHash = createHash("sha256").update(next).digest("hex");
+  await writeFixture(join(repositoryPath, sourceRelativePath), next);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const updated = await execFileAsync(process.execPath, [join(serverRoot, "dist/asset/confirm-cli.js"),
+      "--relative-path", sourceRelativePath, "--expected-content-hash", nextHash,
+      "--update-asset-id", "ast2034512345678901248", "--expected-baseline-hash", contentHash,
+    ], { env: { ...process.env, CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH: repositoryPath,
+      CODEX_MEMORY_OS_DATABASE_PATH: join(fixtureRoot, "confirm.sqlite"), CODEX_MEMORY_OS_WORKSPACES_PATH: workspaceConfigPath } });
+    assert.equal(JSON.parse(updated.stdout).contentHash, nextHash);
+  }
+  assert.deepEqual(await readFile(join(repositoryPath, targetRelativePath)), next);
+  const versions = new AssetContentVersionRepository(join(fixtureRoot, "confirm.sqlite"));
+  try { assert.deepEqual(versions.read("ast2034512345678901248").map(v => v.rawContent), [next, source]); }
+  finally { versions.close(); }
   process.stdout.write(`${JSON.stringify({ event: "N12_ASSET_CONFIRM_BUILD_SMOKE", status: "ok" })}\n`);
 } finally {
   await rm(fixtureRoot, { force: true, recursive: true });

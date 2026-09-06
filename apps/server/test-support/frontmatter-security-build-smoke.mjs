@@ -67,6 +67,7 @@ try {
       ...process.env,
       CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH: repositoryPath,
       CODEX_MEMORY_OS_WORKSPACES_PATH: workspaceConfigPath,
+      CODEX_MEMORY_OS_DATABASE_PATH: join(root, "memory.sqlite"),
     },
   };
   await assert.rejects(

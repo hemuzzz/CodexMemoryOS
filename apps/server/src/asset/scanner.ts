@@ -52,6 +52,7 @@ export interface AssetDiagnostic {
 }
 
 export interface ScannedAsset {
+  rawContent: Buffer;
   absolutePath: string;
   content: string;
   contentHash: string;
@@ -594,6 +595,7 @@ async function readCandidate(options: ReadCandidateOptions): Promise<ScannedFile
       fileSize,
       frontmatter: parsedFrontmatter.data,
       markdown: source,
+      rawContent: bytes,
       modifiedAt,
       relativePath: options.relativePath,
     },

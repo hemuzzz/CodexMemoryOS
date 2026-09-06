@@ -436,7 +436,7 @@ test("N12 detects source changes after Scanner validation and cleans an uncomple
           },
         },
       ),
-      "POST_MOVE_VALIDATION_FAILED",
+      "CONFIRM_PARTIAL_WRITE",
     );
     assert.deepEqual(await readFile(sourcePath), changed);
     assert.equal(await exists(targetPath), false);
@@ -462,10 +462,7 @@ test("N12 allows at most one concurrent confirmation and repeated execution cann
       await readFile(join(fixture.repositoryPath, "assets/global/skills/concurrent.md")),
       source,
     );
-    await assertConfirmationRejects(
-      () => confirmInboxAsset(input, fixture),
-      "INBOX_ASSET_NOT_FOUND",
-    );
+    assert.equal((await confirmInboxAsset(input, fixture)).ok, true);
   } finally {
     await fixture.cleanup();
   }
@@ -522,14 +519,14 @@ test("N12 fails closed when configuration or a complete repository snapshot is u
     await assertConfirmationRejects(
       () => confirmInboxAsset(
         { relativePath: "inbox/global/memories/a.md", expectedContentHash: "0".repeat(64) },
-        { repositoryPath: "relative", workspaceConfigPath: fixture.workspaceConfigPath },
+        { ...fixture, repositoryPath: "relative" },
       ),
       "CONFIRM_CONFIGURATION_INVALID",
     );
     await assertConfirmationRejects(
       () => confirmInboxAsset(
         { relativePath: "inbox/global/memories/a.md", expectedContentHash: "0".repeat(64) },
-        { repositoryPath: join(fixture.rootPath, "missing-repository"), workspaceConfigPath: fixture.workspaceConfigPath },
+        { ...fixture, repositoryPath: join(fixture.rootPath, "missing-repository") },
       ),
       "INBOX_SNAPSHOT_UNAVAILABLE",
     );
@@ -539,7 +536,7 @@ test("N12 fails closed when configuration or a complete repository snapshot is u
     await assertConfirmationRejects(
       () => confirmInboxAsset(
         { relativePath: "inbox/global/memories/a.md", expectedContentHash: "0".repeat(64) },
-        { repositoryPath: fixture.repositoryPath, workspaceConfigPath: invalidConfigPath },
+        { ...fixture, workspaceConfigPath: invalidConfigPath },
       ),
       "INBOX_SNAPSHOT_UNAVAILABLE",
     );
@@ -570,6 +567,7 @@ test("N12 CLI returns stable JSON, safe exit codes, and no sensitive content", a
     const environment = {
       [CONFIRM_ASSET_REPOSITORY_PATH_ENV]: fixture.repositoryPath,
       [CONFIRM_WORKSPACE_CONFIG_PATH_ENV]: fixture.workspaceConfigPath,
+      CODEX_MEMORY_OS_DATABASE_PATH: fixture.databasePath,
     };
     const stdout = new StringWriter();
     const stderr = new StringWriter();

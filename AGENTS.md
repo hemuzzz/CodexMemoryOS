@@ -12,7 +12,7 @@
 
 ## 项目定位
 
-- 个人、本地、Codex 专用的知识运行时：Markdown 保存知识原件，SQLite 保存 Catalog/FTS 派生索引和 Task/Usage 运行数据，Vue Hub 提供只读浏览。
+- 个人、本地、Codex 专用的知识运行时：Markdown 保存知识原件，SQLite 保存 Catalog/FTS 派生索引、Task/Usage 运行数据和已确认内容的 CURRENT/PREVIOUS 持久快照，Vue Hub 提供只读浏览。
 - 当前范围包括 Workspace 隔离的 Search/Read、显式 Task Loadout、Usage、HTTP MCP、Codex Hook 和单文件人工确认。
 - 不因普通功能修改引入模型 API、MemoryProxy、团队权限平台、知识版本审批账本或旧 Engineering Memory V4 的整套对象。新增能力按明确需求另行确定边界。
 
@@ -42,7 +42,7 @@
 - 正式 Asset 与 Inbox 候选分离，真实候选确认绑定确切文件和 Hash；代码修改授权不等于知识确认授权。
 - 模型可见内容必须满足当前文件资格与 Task Workspace 边界；历史索引或 Loadout 不替代当前资格。
 - Loadout 显式装配，Recall/Read/Used 分别记录；Hook 不自动装配，Hub/REST 保持只读。
-- Catalog/FTS 可重建，索引维护不得顺带清空 Task/Usage 或已保存 Loadout。
+- Catalog/FTS 可重建，索引维护不得顺带清空 Task/Usage、已保存 Loadout 或内容版本。
 
 ## 按主题阅读
 
@@ -51,6 +51,7 @@
 | 任务主题 | 阅读入口 |
 |---|---|
 | 数据模型、Asset、Workspace、Task/Loadout/Usage、确认与索引 | [数据与行为约定](工程约定/数据与行为约定.md) |
+| 知识正文、模板与 Native Memories 协同 | [知识内容模型](工程约定/知识内容模型.md) |
 | 实施测试、风险核验、构建产物与命令 | [验证约定](工程约定/验证约定.md) |
 | 新建、修改、移动或归档项目文档 | [文档约定](工程约定/文档约定.md) |
 | 安装、启动、配置和当前使用边界 | `README.md`、根目录及受影响包的 `package.json` |

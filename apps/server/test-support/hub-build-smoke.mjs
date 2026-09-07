@@ -49,7 +49,7 @@ try {
   assert.equal(indexResponse.status, 200);
   assert.match(indexResponse.headers.get("content-type") ?? "", /text\/html/u);
   const indexHtml = await indexResponse.text();
-  assert.match(indexHtml, /CodexMemoryOS · Asset Desk/u);
+  assert.match(indexHtml, /CodexMemoryOS · 知识空间/u);
   const assetSource = indexHtml.match(/<script[^>]+src="([^"]+)"/u)?.[1];
   assert.notEqual(assetSource, undefined);
   const builtAsset = await fetch(`${origin}${assetSource}`);
@@ -70,11 +70,11 @@ try {
   for (const path of ["/api/not-found", "/assets/missing.js", "/client-route"]) {
     const response = await fetch(`${origin}${path}`);
     assert.equal(response.status, 404, path);
-    assert.doesNotMatch(await response.text(), /CodexMemoryOS · Asset Desk/u, path);
+    assert.doesNotMatch(await response.text(), /CodexMemoryOS · 知识空间/u, path);
   }
   const mcpResponse = await fetch(`${origin}/mcp`);
   assert.notEqual(mcpResponse.status, 200);
-  assert.doesNotMatch(await mcpResponse.text(), /CodexMemoryOS · Asset Desk/u);
+  assert.doesNotMatch(await mcpResponse.text(), /CodexMemoryOS · 知识空间/u);
 
   process.stdout.write(`${JSON.stringify({ event: "N10_HUB_BUILD_SMOKE", status: "ok" })}\n`);
 } finally {

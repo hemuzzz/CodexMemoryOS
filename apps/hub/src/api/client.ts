@@ -9,7 +9,7 @@ import type {
   TaskLoadoutSummary,
   UsageListFilters,
   UsageListItem,
-} from "./types";
+} from "./types.js";
 
 interface RestErrorDetail {
   code: string;
@@ -79,7 +79,7 @@ export class HubApiClient {
       }
       throw new HubApiError(
         "SERVICE_UNREACHABLE",
-        "The local CodexMemoryOS service is not responding",
+        "本地 CodexMemoryOS 服务未响应",
         true,
         0,
       );
@@ -91,7 +91,7 @@ export class HubApiClient {
     } catch {
       throw new HubApiError(
         "INVALID_RESPONSE",
-        "The local service returned an unreadable response",
+        "本地服务返回了无法读取的响应",
         true,
         response.status,
       );
@@ -110,7 +110,7 @@ export class HubApiClient {
     }
     throw new HubApiError(
       "INVALID_RESPONSE",
-      "The local service returned an unexpected response",
+      "本地服务返回了非预期响应",
       true,
       response.status,
     );
@@ -190,7 +190,7 @@ function withQuery(path: string, parameters: URLSearchParams): string {
 function invalidFilterCombination(): HubApiError {
   return new HubApiError(
     "INVALID_FILTER_COMBINATION",
-    "Workspace and scope filters are not compatible",
+    "工作区与范围筛选不兼容",
     false,
     0,
   );

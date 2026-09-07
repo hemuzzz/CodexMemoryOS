@@ -75,6 +75,8 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm build
 }
 ```
 
+本机迁移实例（2026-09-07）：`knowledge-base/config/workspaces.json` 已配置 CodexMemoryOS 和 xm-ai-job 两个 Workspace；本次确认入库分别为 6 份治理知识和 34 份业务知识。旧系统由用户确认已停用，旧源保留。正式清单、Hash 及验证边界见[旧知识迁移结果](migration/v4-generation-report.md)；xm-ai-job 的正向 MCP 使用需在该项目的真实 Task 中验证，不能借当前项目 Task 跨范围读取。
+
 Hook 按路径段边界执行最长路径匹配。没有匹配的 cwd 得到 `workspace=null`，只能访问 GLOBAL Asset；同等最长路径同时属于不同 Workspace 时拒绝继续。
 
 每个 Asset 是一个普通 Markdown 文件：

@@ -118,7 +118,7 @@ describe("HubApiClient", () => {
     const offline = new HubApiClient(vi.fn<typeof fetch>().mockRejectedValue(new TypeError("private network detail")));
     await expect(offline.getInbox()).rejects.toMatchObject({
       code: "SERVICE_UNREACHABLE",
-      message: "The local CodexMemoryOS service is not responding",
+      message: "本地 CodexMemoryOS 服务未响应",
       status: 0,
     });
   });

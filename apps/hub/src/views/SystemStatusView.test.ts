@@ -58,9 +58,9 @@ describe("System Status view", () => {
       fetchMock.mockResolvedValue(jsonResponse({ ok: true, data: value }));
       const wrapper = await mountLoadedView();
       expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/system/status");
-      expect(wrapper.get(".status-verdict .readiness-label").text()).toBe(readiness);
-      expect(wrapper.text()).toContain(value.index.indexState);
-      expect(wrapper.text()).toContain(`Rebuild required${value.index.rebuildRequired ? "YES" : "NO"}`);
+      expect(wrapper.get(".status-verdict .readiness-label").text()).toBe(({ READY: "就绪", DEGRADED: "降级运行", REBUILD_REQUIRED: "需要重建" })[readiness]);
+      expect(wrapper.text()).toContain(({ READY: "就绪", DEGRADED: "降级运行", REBUILD_REQUIRED: "需要重建" })[value.index.indexState]);
+      expect(wrapper.text()).toContain(`需要重建${value.index.rebuildRequired ? "是" : "否"}`);
       expect(wrapper.text()).not.toContain("Status history");
     },
   );
@@ -68,13 +68,13 @@ describe("System Status view", () => {
   it("shows all service, repository, index, endpoint, and diagnostic fields in service order", async () => {
     const wrapper = await mountLoadedView();
     expect(wrapper.text()).toContain("codex-memory-os");
-    expect(wrapper.text()).toContain("1h 1m 1s (3661 seconds)");
+    expect(wrapper.text()).toContain("1时 1分 1秒 (3661 秒)");
     expect(wrapper.text()).toContain("/tmp/codex-memory-os/assets");
-    expect(wrapper.text()).toContain("Catalog count12");
-    expect(wrapper.text()).toContain("FTS count12");
-    expect(wrapper.text()).toContain("Watcher stateRUNNING");
-    expect(wrapper.text()).toContain("Endpoint readyYES");
-    expect(wrapper.text()).toContain("It does not claim that any Codex client is connected.");
+    expect(wrapper.text()).toContain("目录条目12");
+    expect(wrapper.text()).toContain("全文索引条目12");
+    expect(wrapper.text()).toContain("文件监听状态进行中");
+    expect(wrapper.text()).toContain("端点就绪是");
+    expect(wrapper.text()).toContain("不代表 Codex 客户端已连接。");
     expect(wrapper.findAll(".status-diagnostics > li > div > code").map((item) => item.text())).toEqual([
       "INVALID_FRONTMATTER",
       "WATCHER_EVENT_FAILED",
@@ -93,11 +93,11 @@ describe("System Status view", () => {
       },
     }));
     const wrapper = await mountLoadedView();
-    expect(wrapper.findAll("dd").filter((item) => item.text() === "Unknown / unavailable")).toHaveLength(5);
-    expect(wrapper.text()).not.toContain("Formal Assets0");
-    expect(wrapper.text()).not.toContain("Inbox Assets0");
-    expect(wrapper.text()).not.toContain("Catalog count0");
-    expect(wrapper.text()).not.toContain("FTS count0");
+    expect(wrapper.findAll("dd").filter((item) => item.text() === "未知 / 不可用")).toHaveLength(5);
+    expect(wrapper.text()).not.toContain("正式资产0");
+    expect(wrapper.text()).not.toContain("候选资产0");
+    expect(wrapper.text()).not.toContain("目录条目0");
+    expect(wrapper.text()).not.toContain("全文索引条目0");
   });
 
   it("loads once, then refreshes only after the explicit control is used", async () => {
@@ -105,7 +105,7 @@ describe("System Status view", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await flushPromises();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    await buttonNamed(wrapper, "Refresh status").trigger("click");
+    await buttonNamed(wrapper, "刷新状态").trigger("click");
     await flushPromises();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
@@ -118,13 +118,13 @@ describe("System Status view", () => {
       .mockImplementationOnce(async () => initial.promise)
       .mockResolvedValueOnce(jsonResponse({ ok: true, data: degraded }));
     const wrapper = mount(SystemStatusView);
-    await buttonNamed(wrapper, "Refresh status").trigger("click");
+    await buttonNamed(wrapper, "刷新状态").trigger("click");
     await flushPromises();
-    expect(wrapper.get(".status-verdict .readiness-label").text()).toBe("DEGRADED");
+    expect(wrapper.get(".status-verdict .readiness-label").text()).toBe("降级运行");
 
     initial.resolve(jsonResponse({ ok: true, data: readyStatus }));
     await flushPromises();
-    expect(wrapper.get(".status-verdict .readiness-label").text()).toBe("DEGRADED");
+    expect(wrapper.get(".status-verdict .readiness-label").text()).toBe("降级运行");
   });
 
   it.each([503, 500])("shows safe explicit recovery for HTTP %i", async (status) => {
@@ -134,16 +134,16 @@ describe("System Status view", () => {
     }, status));
     const wrapper = await mountLoadedView();
     expect(wrapper.text()).toContain(status === 503
-      ? "System Status is temporarily unavailable"
-      : "Local service could not complete the request");
+      ? "系统状态暂时不可用"
+      : "本地服务未能完成请求");
     expect(wrapper.text()).not.toContain("private path");
-    expect(buttonNamed(wrapper, "Retry").exists()).toBe(true);
+    expect(buttonNamed(wrapper, "重试").exists()).toBe(true);
   });
 
   it("handles an unreadable response with safe copy", async () => {
     fetchMock.mockResolvedValue(new Response("SQL path and stack", { status: 500 }));
     const wrapper = await mountLoadedView();
-    expect(wrapper.text()).toContain("Response could not be read");
+    expect(wrapper.text()).toContain("无法读取服务响应");
     expect(wrapper.text()).not.toContain("SQL path and stack");
   });
 });

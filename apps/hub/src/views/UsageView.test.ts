@@ -33,12 +33,12 @@ describe("Usage view", () => {
     expect(wrapper.text()).toContain(usage.usageId);
     expect(wrapper.text()).toContain(usage.taskId);
     expect(wrapper.text()).toContain(usage.assetId);
-    expect(wrapper.text()).toContain("Recall7");
-    expect(wrapper.text()).toContain("Read4");
-    expect(wrapper.text()).toContain("USED");
-    expect(wrapper.text()).toContain("ASSET MISSING");
-    expect(wrapper.get(".usage-ledger > li").attributes("aria-selected")).toBe("true");
-    expect(wrapper.get(".usage-ledger").attributes("role")).toBe("listbox");
+    expect(wrapper.text()).toContain("召回7");
+    expect(wrapper.text()).toContain("读取4");
+    expect(wrapper.text()).toContain("已使用");
+    expect(wrapper.text()).toContain("资产已缺失");
+    expect(wrapper.get(".usage-ledger").element.tagName).toBe("OL");
+    expect(wrapper.get(".usage-ledger > li").attributes("tabindex")).toBeUndefined();
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
     expect(wrapper.text()).not.toMatch(/\b(Score|Trend|Ranking|Recommendation)\b/u);
   });
@@ -49,16 +49,16 @@ describe("Usage view", () => {
     await inputs[0]?.setValue(usage.taskId);
     await inputs[1]?.setValue(usage.assetId);
     await wrapper.find(".usage-id-filters select").setValue("100");
-    await buttonNamed(wrapper, "Exact").trigger("click");
+    await buttonNamed(wrapper, "指定工作区").trigger("click");
     await wrapper.get(".exact-workspace input").setValue("alpha");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
     expect(fetchMock.mock.calls.some(([input]) => String(input) ===
       `/api/usages?taskId=${usage.taskId}&assetId=${usage.assetId}&workspace=alpha&limit=100`
     )).toBe(true);
-    expect(wrapper.text()).toContain(`Task ${usage.taskId} AND Asset ${usage.assetId} AND Workspace alpha`);
+    expect(wrapper.text()).toContain(`任务 ${usage.taskId} · 资产 ${usage.assetId} · 工作区 alpha`);
 
-    await buttonNamed(wrapper, "NULL only").trigger("click");
+    await buttonNamed(wrapper, "未绑定").trigger("click");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
     expect(fetchMock.mock.calls.some(([input]) => String(input) ===
@@ -71,13 +71,13 @@ describe("Usage view", () => {
     const requestsBefore = fetchMock.mock.calls.length;
     await wrapper.findAll(".usage-id-filters input")[0]?.setValue(" padded ");
     await wrapper.get("form").trigger("submit");
-    expect(wrapper.text()).toContain("Task ID cannot start or end with spaces");
+    expect(wrapper.text()).toContain("任务 ID首尾不能包含空格");
     expect(fetchMock.mock.calls).toHaveLength(requestsBefore);
 
     await wrapper.findAll(".usage-id-filters input")[0]?.setValue("");
-    await buttonNamed(wrapper, "Exact").trigger("click");
+    await buttonNamed(wrapper, "指定工作区").trigger("click");
     await wrapper.get("form").trigger("submit");
-    expect(wrapper.text()).toContain("Enter an exact Workspace name");
+    expect(wrapper.text()).toContain("请输入准确的工作区名称");
     expect(fetchMock.mock.calls).toHaveLength(requestsBefore);
   });
 
@@ -112,7 +112,7 @@ describe("Usage view", () => {
   it("shows normal empty results and safe explicit recovery", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, data: { items: [] } }));
     let wrapper = await mountLoadedView();
-    expect(wrapper.text()).toContain("No Usage in this slice");
+    expect(wrapper.text()).toContain("暂无使用记录");
     wrapper.unmount();
 
     fetchMock.mockResolvedValueOnce(jsonResponse({
@@ -120,9 +120,9 @@ describe("Usage view", () => {
       error: { code: "INTERNAL_ERROR", message: "private database detail", retryable: false },
     }, 500));
     wrapper = await mountLoadedView();
-    expect(wrapper.text()).toContain("Local service could not complete the request");
+    expect(wrapper.text()).toContain("本地服务未能完成请求");
     expect(wrapper.text()).not.toContain("private database detail");
-    expect(buttonNamed(wrapper, "Retry").exists()).toBe(true);
+    expect(buttonNamed(wrapper, "重试").exists()).toBe(true);
   });
 
   it("refreshes only on demand and sends GET requests only", async () => {
@@ -130,7 +130,7 @@ describe("Usage view", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await flushPromises();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    await buttonNamed(wrapper, "Refresh Usage").trigger("click");
+    await buttonNamed(wrapper, "刷新记录").trigger("click");
     await flushPromises();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);

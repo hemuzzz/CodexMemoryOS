@@ -1,7 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+} from "vue";
 
-import { HubApiClient, HubApiError, isAbortError } from "./api/client";
+import { HubApiClient, HubApiError, isAbortError } from "./api/client.js";
 import type {
   AssetDetail,
   AssetLibraryItem,
@@ -10,7 +17,15 @@ import type {
   AssetType,
   InboxDiagnostic,
   InboxItem,
-} from "./api/types";
+} from "./api/types.js";
+import UiIcon from "./components/UiIcon.vue";
+import type { PresentedError } from "./views/view-helpers.js";
+import {
+  asHubApiError,
+  displayValue,
+  formatDate,
+  handleTabKeydown,
+} from "./views/view-helpers.js";
 import SystemStatusView from "./views/SystemStatusView.vue";
 import TaskLoadoutsView from "./views/TaskLoadoutsView.vue";
 import UsageView from "./views/UsageView.vue";
@@ -21,11 +36,6 @@ type DetailTab = "RENDERED" | "RAW" | "FRONTMATTER";
 type InboxDetailTab = "RAW" | "FRONTMATTER";
 type WorkspaceMode = "ALL" | "GLOBAL" | "NAMED";
 type ViewContext = "ASSET_LIST" | "ASSET_DETAIL" | "INBOX";
-
-interface PresentedError {
-  detail: string;
-  title: string;
-}
 
 const api = new HubApiClient();
 const primaryView = ref<PrimaryView>("ASSETS");
@@ -67,15 +77,72 @@ let assetDetailController: AbortController | undefined;
 let inboxController: AbortController | undefined;
 
 const workspaceSuggestions = computed(() =>
-  [...new Set(assets.value.flatMap((asset) => asset.workspace === null ? [] : [asset.workspace]))]
-    .sort((left, right) => left.localeCompare(right)),
+  [
+    ...new Set(
+      assets.value.flatMap((asset) =>
+        asset.workspace === null ? [] : [asset.workspace],
+      ),
+    ),
+  ].sort((left, right) => left.localeCompare(right)),
 );
-const listErrorCopy = computed(() => presentError(assetsError.value, "ASSET_LIST"));
-const detailErrorCopy = computed(() => presentError(detailError.value, "ASSET_DETAIL"));
+const listErrorCopy = computed(() =>
+  presentError(assetsError.value, "ASSET_LIST"),
+);
+const detailErrorCopy = computed(() =>
+  presentError(detailError.value, "ASSET_DETAIL"),
+);
 const inboxErrorCopy = computed(() => presentError(inboxError.value, "INBOX"));
 
-onMounted(() => void loadAssets({ limit: 20 }));
+const searchInput = ref<HTMLInputElement>();
+const theme = ref<"system" | "light" | "dark">("system");
+const viewTitle = computed(() =>
+  primaryView.value === "ASSETS"
+    ? activeView.value === "INBOX"
+      ? "收件箱"
+      : "知识资产"
+    : {
+        TASK_LOADOUTS: "任务与装载",
+        USAGE: "使用记录",
+        SYSTEM_STATUS: "系统状态",
+      }[primaryView.value],
+);
+
+async function focusSearch(): Promise<void> {
+  primaryView.value = "ASSETS";
+  activeView.value = "LIBRARY";
+  await nextTick();
+  searchInput.value?.focus();
+}
+
+function handleShortcut(event: KeyboardEvent): void {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    void focusSearch();
+  }
+}
+
+function changeTheme(): void {
+  document.documentElement.dataset.theme = theme.value;
+  try {
+    localStorage.setItem("hub-theme", theme.value);
+  } catch {
+    /* Appearance still works without storage. */
+  }
+}
+
+onMounted(() => {
+  try {
+    const saved = localStorage.getItem("hub-theme");
+    if (saved === "light" || saved === "dark") theme.value = saved;
+  } catch {
+    /* Use the system appearance when storage is unavailable. */
+  }
+  document.documentElement.dataset.theme = theme.value;
+  window.addEventListener("keydown", handleShortcut);
+  void loadAssets({ limit: 20 });
+});
 onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleShortcut);
   assetListController?.abort();
   assetDetailController?.abort();
   inboxController?.abort();
@@ -131,16 +198,16 @@ function resetFilters(): void {
 
 function currentFilters(): AssetListFilters | undefined {
   if (filters.query.length > 0 && filters.query.trim().length === 0) {
-    filterError.value = "Search must contain a visible character.";
+    filterError.value = "请输入有效的搜索关键词。";
     return undefined;
   }
   if (workspaceMode.value === "NAMED") {
     if (filters.workspace.length === 0) {
-      filterError.value = "Enter an exact Workspace name.";
+      filterError.value = "请输入准确的工作区名称。";
       return undefined;
     }
     if (filters.workspace !== filters.workspace.trim()) {
-      filterError.value = "Workspace names cannot start or end with spaces.";
+      filterError.value = "工作区名称首尾不能包含空格。";
       return undefined;
     }
   }
@@ -165,12 +232,17 @@ async function loadAssets(requestFilters: AssetListFilters): Promise<void> {
   assetsLoading.value = true;
   assetsError.value = undefined;
   try {
-    const result = await api.listAssets(requestFilters, assetListController.signal);
+    const result = await api.listAssets(
+      requestFilters,
+      assetListController.signal,
+    );
     if (requestId !== assetListRequest) {
       return;
     }
     assets.value = result.items;
-    const currentSelection = result.items.find(({ assetId }) => assetId === selectedAssetId.value);
+    const currentSelection = result.items.find(
+      ({ assetId }) => assetId === selectedAssetId.value,
+    );
     const nextSelection = currentSelection ?? result.items[0];
     selectedAssetId.value = nextSelection?.assetId;
     if (nextSelection === undefined) {
@@ -253,10 +325,13 @@ async function loadInbox(): Promise<void> {
     }
     inboxItems.value = result.items;
     inboxDiagnostics.value = result.diagnostics;
-    const retainedItem = result.items.find(({ assetId }) => assetId === selectedInboxItem.value?.assetId);
-    const retainedDiagnostic = result.diagnostics.find((diagnostic) =>
-      diagnostic.code === selectedInboxDiagnostic.value?.code &&
-      diagnostic.relativePath === selectedInboxDiagnostic.value.relativePath
+    const retainedItem = result.items.find(
+      ({ assetId }) => assetId === selectedInboxItem.value?.assetId,
+    );
+    const retainedDiagnostic = result.diagnostics.find(
+      (diagnostic) =>
+        diagnostic.code === selectedInboxDiagnostic.value?.code &&
+        diagnostic.relativePath === selectedInboxDiagnostic.value.relativePath,
     );
     if (retainedItem !== undefined) {
       selectInboxItem(retainedItem);
@@ -298,173 +373,873 @@ function selectInboxDiagnostic(diagnostic: InboxDiagnostic): void {
 }
 
 function isSelectedDiagnostic(diagnostic: InboxDiagnostic): boolean {
-  return selectedInboxDiagnostic.value?.code === diagnostic.code &&
-    selectedInboxDiagnostic.value.relativePath === diagnostic.relativePath;
-}
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return (
+    selectedInboxDiagnostic.value?.code === diagnostic.code &&
+    selectedInboxDiagnostic.value.relativePath === diagnostic.relativePath
+  );
 }
 
 function frontmatterText(frontmatter: object): string {
   return JSON.stringify(frontmatter, null, 2);
 }
 
-function presentError(error: HubApiError | undefined, context: ViewContext): PresentedError | undefined {
+function presentError(
+  error: HubApiError | undefined,
+  context: ViewContext,
+): PresentedError | undefined {
   if (error === undefined) {
     return undefined;
   }
   if (error.code === "SERVICE_UNREACHABLE") {
-    return { title: "Local service is offline", detail: "Start the CodexMemoryOS server, then retry this view." };
+    return {
+      title: "本地服务未连接",
+      detail: "启动 CodexMemoryOS 服务后重试。",
+    };
   }
   if (error.code === "INVALID_RESPONSE") {
-    return { title: "Response could not be read", detail: "The local service returned an unexpected response. Check the server and retry." };
+    return {
+      title: "无法读取服务响应",
+      detail: "服务返回了无法识别的响应，请检查服务后重试。",
+    };
   }
   if (context === "ASSET_DETAIL" && error.status === 404) {
-    return { title: "Asset no longer exists", detail: "Refresh the library to replace this stale selection." };
+    return {
+      title: "知识资产已不存在",
+      detail: "刷新资产列表以获取当前内容。",
+    };
   }
   if (context === "ASSET_DETAIL" && error.code === "ASSET_STALE") {
-    return { title: "Asset changed on disk", detail: "The Catalog has been refreshed. Retry once to load the current Asset." };
+    return {
+      title: "知识文件已更新",
+      detail: "索引已刷新，重试即可读取最新内容。",
+    };
   }
   if (error.status === 503) {
     return {
-      title: context === "INBOX" ? "Inbox is temporarily unavailable" : "Asset service is temporarily unavailable",
-      detail: "The local index or Workspace configuration is not ready. Retry after it recovers.",
+      title: context === "INBOX" ? "收件箱暂时不可用" : "知识服务暂时不可用",
+      detail: "本地索引或工作区配置尚未就绪，请恢复后重试。",
     };
   }
   if (error.status >= 500) {
-    return { title: "Local service could not complete the request", detail: "No internal details were exposed. Check the server log, then retry." };
+    return { title: "本地服务未能完成请求", detail: "请检查服务日志后重试。" };
   }
-  return { title: "Request could not be completed", detail: error.message };
-}
-
-function asHubApiError(error: unknown): HubApiError {
-  return error instanceof HubApiError
-    ? error
-    : new HubApiError("CLIENT_ERROR", "The view could not be loaded", true, 0);
+  return { title: "请求未完成", detail: error.message };
 }
 </script>
 
 <template>
   <div class="app-shell">
-    <header class="masthead">
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+    <aside class="sidebar" aria-label="主导航">
       <div class="brand-lockup">
-        <span class="brand-mark" aria-hidden="true">CM</span>
-        <div>
-          <p class="eyebrow">Local knowledge index</p>
-          <h1>CodexMemoryOS Hub</h1>
-        </div>
+        <span class="brand-mark" aria-hidden="true"
+          ><UiIcon name="layers" /></span
+        ><strong>CodexMemoryOS</strong><span class="local-label">本地</span>
       </div>
-      <p class="read-only-note"><span aria-hidden="true"></span>Read-only workspace</p>
-    </header>
-
-    <nav class="primary-navigation" aria-label="Hub views">
-      <button type="button" :aria-current="primaryView === 'ASSETS' ? 'page' : undefined" @click="primaryView = 'ASSETS'">Assets</button>
-      <button type="button" :aria-current="primaryView === 'TASK_LOADOUTS' ? 'page' : undefined" @click="primaryView = 'TASK_LOADOUTS'">Task Loadouts</button>
-      <button type="button" :aria-current="primaryView === 'USAGE' ? 'page' : undefined" @click="primaryView = 'USAGE'">Usage</button>
-      <button type="button" :aria-current="primaryView === 'SYSTEM_STATUS' ? 'page' : undefined" @click="primaryView = 'SYSTEM_STATUS'">System Status</button>
-    </nav>
-
-    <main v-if="primaryView === 'ASSETS'" class="workbench">
-      <section class="catalog-pane" aria-label="Asset catalog">
-        <div class="view-switch" role="tablist" aria-label="Asset source">
-          <button id="library-tab" type="button" role="tab" :aria-selected="activeView === 'LIBRARY'" :class="{ active: activeView === 'LIBRARY' }" @click="setActiveView('LIBRARY')">Asset Library</button>
-          <button id="inbox-tab" type="button" role="tab" :aria-selected="activeView === 'INBOX'" :class="{ active: activeView === 'INBOX' }" @click="setActiveView('INBOX')">Inbox</button>
+      <button type="button" class="sidebar-search" @click="focusSearch">
+        <UiIcon name="search" /><span>搜索知识</span><kbd>⌘ K</kbd>
+      </button>
+      <p class="nav-label">知识空间</p>
+      <nav class="primary-navigation" aria-label="页面导航">
+        <button
+          type="button"
+          :aria-current="
+            primaryView === 'ASSETS' && activeView === 'LIBRARY'
+              ? 'page'
+              : undefined
+          "
+          @click="
+            primaryView = 'ASSETS';
+            setActiveView('LIBRARY');
+          "
+        >
+          <UiIcon name="library" />知识资产
+        </button>
+        <button
+          type="button"
+          :aria-current="
+            primaryView === 'ASSETS' && activeView === 'INBOX'
+              ? 'page'
+              : undefined
+          "
+          @click="
+            primaryView = 'ASSETS';
+            setActiveView('INBOX');
+          "
+        >
+          <UiIcon name="inbox" />收件箱
+        </button>
+        <button
+          type="button"
+          :aria-current="primaryView === 'TASK_LOADOUTS' ? 'page' : undefined"
+          @click="primaryView = 'TASK_LOADOUTS'"
+        >
+          <UiIcon name="layers" />任务与装载
+        </button>
+        <button
+          type="button"
+          :aria-current="primaryView === 'USAGE' ? 'page' : undefined"
+          @click="primaryView = 'USAGE'"
+        >
+          <UiIcon name="activity" />使用记录
+        </button>
+        <button
+          type="button"
+          :aria-current="primaryView === 'SYSTEM_STATUS' ? 'page' : undefined"
+          @click="primaryView = 'SYSTEM_STATUS'"
+        >
+          <UiIcon name="settings" />系统状态
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="workspace-identity">
+          <span class="workspace-avatar">知</span>
+          <div>
+            <strong>个人知识空间</strong><small>Markdown · 本地知识原件</small>
+          </div>
         </div>
+        <label class="theme-control"
+          ><UiIcon name="sun" /><span>外观</span
+          ><select v-model="theme" aria-label="外观主题" @change="changeTheme">
+            <option value="system">跟随系统</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select></label
+        >
+      </div>
+    </aside>
+    <div id="main-content" class="main-content" tabindex="-1">
+      <header class="page-header">
+        <div class="breadcrumb">
+          <UiIcon
+            :name="primaryView === 'ASSETS' ? 'library' : 'layers'"
+          /><span>知识空间</span><span class="breadcrumb-divider">/</span>
+          <h1>{{ viewTitle }}</h1>
+        </div>
+        <span class="read-only-note"
+          ><span aria-hidden="true"></span>只读浏览</span
+        >
+      </header>
 
-        <template v-if="activeView === 'LIBRARY'">
-          <form class="filter-panel" aria-label="Filter Asset Library" @submit.prevent="applyFilters">
-            <label class="search-field"><span>Search</span><input v-model="filters.query" type="search" placeholder="Title, summary, or content" /></label>
-            <fieldset class="workspace-filter">
-              <legend>Workspace</legend>
-              <div class="segmented-control">
-                <button type="button" :aria-pressed="workspaceMode === 'ALL'" @click="setWorkspaceMode('ALL')">All</button>
-                <button type="button" :aria-pressed="workspaceMode === 'GLOBAL'" @click="setWorkspaceMode('GLOBAL')">GLOBAL only</button>
-                <button type="button" :aria-pressed="workspaceMode === 'NAMED'" @click="setWorkspaceMode('NAMED')">Exact</button>
+      <main v-if="primaryView === 'ASSETS'" class="workbench">
+        <section class="catalog-pane" aria-label="知识资产列表">
+          <template v-if="activeView === 'LIBRARY'">
+            <form
+              class="filter-panel"
+              aria-label="筛选知识资产"
+              @submit.prevent="applyFilters"
+            >
+              <label class="search-field"
+                ><span>搜索</span
+                ><input
+                  ref="searchInput"
+                  v-model="filters.query"
+                  type="search"
+                  placeholder="搜索标题、摘要或正文…"
+              /></label>
+              <details class="filter-disclosure">
+                <summary>
+                  <UiIcon name="filter" />筛选条件<span>{{
+                    filters.type ? displayValue(filters.type) : "全部类型"
+                  }}</span>
+                </summary>
+                <fieldset class="workspace-filter">
+                  <legend>工作区</legend>
+                  <div class="segmented-control">
+                    <button
+                      type="button"
+                      :aria-pressed="workspaceMode === 'ALL'"
+                      @click="setWorkspaceMode('ALL')"
+                    >
+                      全部
+                    </button>
+                    <button
+                      type="button"
+                      :aria-pressed="workspaceMode === 'GLOBAL'"
+                      @click="setWorkspaceMode('GLOBAL')"
+                    >
+                      仅全局
+                    </button>
+                    <button
+                      type="button"
+                      :aria-pressed="workspaceMode === 'NAMED'"
+                      @click="setWorkspaceMode('NAMED')"
+                    >
+                      指定工作区
+                    </button>
+                  </div>
+                  <label
+                    v-if="workspaceMode === 'NAMED'"
+                    class="exact-workspace"
+                  >
+                    <span>工作区名称</span>
+                    <input
+                      v-model="filters.workspace"
+                      list="workspace-suggestions"
+                      autocomplete="off"
+                    />
+                    <datalist id="workspace-suggestions">
+                      <option
+                        v-for="workspace in workspaceSuggestions"
+                        :key="workspace"
+                        :value="workspace"
+                      />
+                    </datalist>
+                    <small>建议名称来自当前结果。</small>
+                  </label>
+                </fieldset>
+                <div class="filter-row">
+                  <label
+                    ><span>类型</span
+                    ><select v-model="filters.type">
+                      <option value="">全部类型</option>
+                      <option value="MEMORY">工程记忆</option>
+                      <option value="DOCUMENT">文档</option>
+                      <option value="SKILL">技能</option>
+                    </select></label
+                  >
+                  <label
+                    ><span>范围</span
+                    ><select v-model="filters.scope" @change="reconcileScope">
+                      <option value="">全部范围</option>
+                      <option value="GLOBAL">全局知识</option>
+                      <option value="WORKSPACE">工作区</option>
+                    </select></label
+                  >
+                  <label
+                    ><span>显示条数</span
+                    ><select v-model="filters.limit">
+                      <option :value="20">20</option>
+                      <option :value="50">50</option>
+                      <option :value="100">100</option>
+                    </select></label
+                  >
+                </div>
+              </details>
+              <p v-if="filterError" class="field-error" role="alert">
+                {{ filterError }}
+              </p>
+              <div class="filter-actions">
+                <button type="submit" class="primary-button">应用筛选</button
+                ><button
+                  type="button"
+                  class="quiet-button"
+                  @click="resetFilters"
+                >
+                  重置
+                </button>
               </div>
-              <label v-if="workspaceMode === 'NAMED'" class="exact-workspace">
-                <span>Exact Workspace name</span>
-                <input v-model="filters.workspace" list="workspace-suggestions" autocomplete="off" />
-                <datalist id="workspace-suggestions"><option v-for="workspace in workspaceSuggestions" :key="workspace" :value="workspace" /></datalist>
-                <small>Suggestions come only from the current result set.</small>
-              </label>
-            </fieldset>
-            <div class="filter-row">
-              <label><span>Type</span><select v-model="filters.type"><option value="">All types</option><option value="MEMORY">MEMORY</option><option value="DOCUMENT">DOCUMENT</option><option value="SKILL">SKILL</option></select></label>
-              <label><span>Scope</span><select v-model="filters.scope" @change="reconcileScope"><option value="">All scopes</option><option value="GLOBAL">GLOBAL</option><option value="WORKSPACE">WORKSPACE</option></select></label>
-              <label><span>Limit</span><select v-model="filters.limit"><option :value="20">20</option><option :value="50">50</option><option :value="100">100</option></select></label>
+            </form>
+
+            <div class="result-heading">
+              <div>
+                <p class="eyebrow">浏览知识</p>
+                <h2>资产列表</h2>
+              </div>
+              <span v-if="!assetsLoading && !assetsError" aria-live="polite"
+                >{{ assets.length }} 条</span
+              >
             </div>
-            <p v-if="filterError" class="field-error" role="alert">{{ filterError }}</p>
-            <div class="filter-actions"><button type="submit" class="primary-button">Apply filters</button><button type="button" class="quiet-button" @click="resetFilters">Clear</button></div>
-          </form>
-
-          <div class="result-heading"><div><p class="eyebrow">Current slice</p><h2>Library</h2></div><span v-if="!assetsLoading && !assetsError" aria-live="polite">{{ assets.length }} shown</span></div>
-          <div v-if="assetsLoading" class="state-panel compact" role="status" aria-live="polite"><span class="loading-line" aria-hidden="true"></span><p>Reading the Asset index…</p></div>
-          <div v-else-if="assetsError && listErrorCopy" class="state-panel compact error-state" role="alert"><strong>{{ listErrorCopy.title }}</strong><p>{{ listErrorCopy.detail }}</p><button type="button" class="secondary-button" @click="applyFilters">Retry</button></div>
-          <div v-else-if="assets.length === 0" class="state-panel compact"><strong>No Assets in this slice</strong><p>Change the search or filters. The result has no hidden pages.</p></div>
-          <ol v-else class="asset-list" aria-label="Asset results">
-            <li v-for="asset in assets" :key="asset.assetId">
-              <button type="button" class="asset-card" :class="[`type-${asset.type.toLowerCase()}`, { selected: selectedAssetId === asset.assetId }]" :aria-current="selectedAssetId === asset.assetId ? 'true' : undefined" @click="selectAsset(asset.assetId)">
-                <span class="asset-card-topline"><span class="tag">{{ asset.type }}</span><span class="scope-label">{{ asset.scope === 'GLOBAL' ? 'GLOBAL' : asset.workspace }}</span></span>
-                <strong>{{ asset.title }}</strong><span class="asset-summary">{{ asset.summary }}</span>
-                <span v-if="appliedQuery && asset.matchedSnippet" class="match-snippet">{{ asset.matchedSnippet }}</span>
-                <span v-if="appliedQuery" class="match-meta">{{ asset.searchStrategy ?? 'MATCH' }}<template v-if="asset.score !== undefined"> · {{ asset.score }}</template></span>
-                <span class="path-line mono">{{ asset.relativePath }}</span>
-                <span class="asset-card-footer"><span class="mono">{{ asset.assetId }}</span><time :datetime="asset.modifiedAt">{{ formatDate(asset.modifiedAt) }}</time></span>
+            <div
+              v-if="assetsLoading"
+              class="state-panel compact"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="loading-line" aria-hidden="true"></span>
+              <p>正在读取知识资产…</p>
+            </div>
+            <div
+              v-else-if="assetsError && listErrorCopy"
+              class="state-panel compact error-state"
+              role="alert"
+            >
+              <strong>{{ listErrorCopy.title }}</strong>
+              <p>{{ listErrorCopy.detail }}</p>
+              <button
+                type="button"
+                class="secondary-button"
+                @click="applyFilters"
+              >
+                重试
               </button>
-            </li>
-          </ol>
-        </template>
+            </div>
+            <div v-else-if="assets.length === 0" class="state-panel compact">
+              <strong>没有找到知识资产</strong>
+              <p>试试其他关键词，或调整筛选条件。</p>
+            </div>
+            <ol v-else class="asset-list" aria-label="知识资产结果">
+              <li v-for="asset in assets" :key="asset.assetId">
+                <button
+                  type="button"
+                  class="asset-card"
+                  :class="[
+                    `type-${asset.type.toLowerCase()}`,
+                    { selected: selectedAssetId === asset.assetId },
+                  ]"
+                  :aria-current="
+                    selectedAssetId === asset.assetId ? 'true' : undefined
+                  "
+                  @click="selectAsset(asset.assetId)"
+                >
+                  <span class="asset-card-topline"
+                    ><span class="tag">{{ displayValue(asset.type) }}</span
+                    ><span class="scope-label">{{
+                      asset.scope === "GLOBAL" ? "全局知识" : asset.workspace
+                    }}</span></span
+                  >
+                  <strong>{{ asset.title }}</strong
+                  ><span class="asset-summary">{{ asset.summary }}</span>
+                  <span
+                    v-if="appliedQuery && asset.matchedSnippet"
+                    class="match-snippet"
+                    >{{ asset.matchedSnippet }}</span
+                  >
+                  <span v-if="appliedQuery" class="match-meta"
+                    >{{ asset.searchStrategy ?? "MATCH"
+                    }}<template v-if="asset.score !== undefined">
+                      · {{ asset.score }}</template
+                    ></span
+                  >
+                  <span class="asset-card-footer"
+                    ><time :datetime="asset.modifiedAt">{{
+                      formatDate(asset.modifiedAt)
+                    }}</time></span
+                  >
+                </button>
+              </li>
+            </ol>
+          </template>
 
-        <template v-else>
-          <div class="inbox-intro"><div><p class="eyebrow">Live repository scan</p><h2>Inbox</h2></div><button type="button" class="secondary-button" @click="loadInbox">Refresh scan</button></div>
-          <p class="supporting-copy">Candidates and diagnostics are shown exactly as found. Nothing here can be promoted or changed.</p>
-          <div v-if="inboxLoading" class="state-panel compact" role="status" aria-live="polite"><span class="loading-line" aria-hidden="true"></span><p>Scanning Inbox…</p></div>
-          <div v-else-if="inboxError && inboxErrorCopy" class="state-panel compact error-state" role="alert"><strong>{{ inboxErrorCopy.title }}</strong><p>{{ inboxErrorCopy.detail }}</p><button type="button" class="secondary-button" @click="loadInbox">Retry</button></div>
-          <div v-else-if="inboxItems.length === 0 && inboxDiagnostics.length === 0" class="state-panel compact"><strong>Inbox is clear</strong><p>No candidate files or Scanner diagnostics were found.</p></div>
-          <div v-else class="inbox-groups">
-            <section v-if="inboxItems.length > 0" aria-labelledby="candidate-heading"><h3 id="candidate-heading">Candidates <span>{{ inboxItems.length }}</span></h3>
-              <ol class="asset-list"><li v-for="item in inboxItems" :key="item.assetId"><button type="button" class="asset-card" :class="[`type-${item.type.toLowerCase()}`, { selected: selectedInboxItem?.assetId === item.assetId }]" @click="selectInboxItem(item)"><span class="asset-card-topline"><span class="tag">{{ item.type }}</span><span class="scope-label">{{ item.scope === 'GLOBAL' ? 'GLOBAL' : item.workspace }}</span></span><strong>{{ item.title }}</strong><span class="asset-summary">{{ item.summary }}</span><span class="path-line mono">{{ item.relativePath }}</span></button></li></ol>
-            </section>
-            <section v-if="inboxDiagnostics.length > 0" aria-labelledby="diagnostic-heading"><h3 id="diagnostic-heading">Diagnostics <span>{{ inboxDiagnostics.length }}</span></h3>
-              <ol class="diagnostic-list"><li v-for="(diagnostic, index) in inboxDiagnostics" :key="`${diagnostic.relativePath}:${diagnostic.code}:${index}`"><button type="button" class="diagnostic-card" :class="{ selected: isSelectedDiagnostic(diagnostic), conflict: diagnostic.code === 'ID_CONFLICT' || diagnostic.code === 'DUPLICATE_ASSET_ID' }" @click="selectInboxDiagnostic(diagnostic)"><strong class="mono">{{ diagnostic.code }}</strong><span>{{ diagnostic.message }}</span><span class="path-line mono">{{ diagnostic.relativePath }}</span></button></li></ol>
-            </section>
-          </div>
-        </template>
-      </section>
+          <template v-else>
+            <div class="inbox-intro">
+              <div>
+                <p class="eyebrow">候选知识</p>
+                <h2>收件箱</h2>
+              </div>
+              <button type="button" class="secondary-button" @click="loadInbox">
+                刷新
+              </button>
+            </div>
+            <p class="supporting-copy">
+              浏览待确认的知识候选与文件问题。入库确认在 Codex 中完成。
+            </p>
+            <div
+              v-if="inboxLoading"
+              class="state-panel compact"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="loading-line" aria-hidden="true"></span>
+              <p>正在读取收件箱…</p>
+            </div>
+            <div
+              v-else-if="inboxError && inboxErrorCopy"
+              class="state-panel compact error-state"
+              role="alert"
+            >
+              <strong>{{ inboxErrorCopy.title }}</strong>
+              <p>{{ inboxErrorCopy.detail }}</p>
+              <button type="button" class="secondary-button" @click="loadInbox">
+                重试
+              </button>
+            </div>
+            <div
+              v-else-if="
+                inboxItems.length === 0 && inboxDiagnostics.length === 0
+              "
+              class="state-panel compact"
+            >
+              <strong>收件箱已清空</strong>
+              <p>暂无知识候选或文件问题。</p>
+            </div>
+            <div v-else class="inbox-groups">
+              <section
+                v-if="inboxItems.length > 0"
+                aria-labelledby="candidate-heading"
+              >
+                <h3 id="candidate-heading">
+                  待确认候选 <span>{{ inboxItems.length }}</span>
+                </h3>
+                <ol class="asset-list">
+                  <li v-for="item in inboxItems" :key="item.assetId">
+                    <button
+                      type="button"
+                      class="asset-card"
+                      :class="[
+                        `type-${item.type.toLowerCase()}`,
+                        {
+                          selected: selectedInboxItem?.assetId === item.assetId,
+                        },
+                      ]"
+                      @click="selectInboxItem(item)"
+                    >
+                      <span class="asset-card-topline"
+                        ><span class="tag">{{ displayValue(item.type) }}</span
+                        ><span class="scope-label">{{
+                          item.scope === "GLOBAL" ? "全局知识" : item.workspace
+                        }}</span></span
+                      ><strong>{{ item.title }}</strong
+                      ><span class="asset-summary">{{ item.summary }}</span
+                      ><span class="path-line mono">{{
+                        item.relativePath
+                      }}</span>
+                    </button>
+                  </li>
+                </ol>
+              </section>
+              <section
+                v-if="inboxDiagnostics.length > 0"
+                aria-labelledby="diagnostic-heading"
+              >
+                <h3 id="diagnostic-heading">
+                  诊断信息 <span>{{ inboxDiagnostics.length }}</span>
+                </h3>
+                <ol class="diagnostic-list">
+                  <li
+                    v-for="(diagnostic, index) in inboxDiagnostics"
+                    :key="`${diagnostic.relativePath}:${diagnostic.code}:${index}`"
+                  >
+                    <button
+                      type="button"
+                      class="diagnostic-card"
+                      :class="{
+                        selected: isSelectedDiagnostic(diagnostic),
+                        conflict:
+                          diagnostic.code === 'ID_CONFLICT' ||
+                          diagnostic.code === 'DUPLICATE_ASSET_ID',
+                      }"
+                      @click="selectInboxDiagnostic(diagnostic)"
+                    >
+                      <strong class="mono">{{ diagnostic.code }}</strong
+                      ><span>{{ diagnostic.message }}</span
+                      ><span class="path-line mono">{{
+                        diagnostic.relativePath
+                      }}</span>
+                    </button>
+                  </li>
+                </ol>
+              </section>
+            </div>
+          </template>
+        </section>
 
-      <section class="detail-pane" aria-label="Selected item detail">
-        <template v-if="activeView === 'LIBRARY'">
-          <div v-if="detailLoading" class="state-panel detail-state" role="status" aria-live="polite"><span class="loading-line" aria-hidden="true"></span><strong>Opening Asset…</strong><p>The selected Markdown and Usage summary are loading.</p></div>
-          <div v-else-if="detailError && detailErrorCopy" class="state-panel detail-state error-state" role="alert"><p class="error-code mono">{{ detailError.code }}</p><strong>{{ detailErrorCopy.title }}</strong><p>{{ detailErrorCopy.detail }}</p><button type="button" class="secondary-button" @click="retryDetail">{{ detailError.status === 404 ? 'Refresh library' : 'Retry detail' }}</button></div>
-          <div v-else-if="assetDetail" class="detail-document">
-            <header class="document-header"><div class="document-kicker"><span class="tag">{{ assetDetail.type }}</span><span>{{ assetDetail.scope === 'GLOBAL' ? 'GLOBAL' : assetDetail.workspace }}</span></div><h2>{{ assetDetail.title }}</h2><p>{{ assetDetail.summary }}</p></header>
-            <dl class="metadata-sheet"><div><dt>Asset ID</dt><dd><code>{{ assetDetail.assetId }}</code></dd></div><div><dt>Workspace</dt><dd>{{ assetDetail.workspace ?? 'GLOBAL' }}</dd></div><div><dt>Path</dt><dd><code>{{ assetDetail.relativePath }}</code></dd></div><div><dt>Modified</dt><dd><time :datetime="assetDetail.modifiedAt">{{ formatDate(assetDetail.modifiedAt) }}</time></dd></div><div class="wide-row"><dt>Content Hash</dt><dd><code>{{ assetDetail.contentHash }}</code></dd></div></dl>
-            <section class="usage-section" aria-labelledby="usage-heading"><div class="section-heading"><div><p class="eyebrow">Observed use</p><h3 id="usage-heading">Usage summary</h3></div></div><dl class="usage-strip"><div><dt>Tasks</dt><dd>{{ assetDetail.usageSummary.taskCount }}</dd></div><div><dt>Recall</dt><dd>{{ assetDetail.usageSummary.recallCount }}</dd></div><div><dt>Read</dt><dd>{{ assetDetail.usageSummary.readCount }}</dd></div><div><dt>Used tasks</dt><dd>{{ assetDetail.usageSummary.usedTaskCount }}</dd></div></dl></section>
-            <section class="content-section" aria-labelledby="content-heading"><div class="section-heading content-heading-row"><div><p class="eyebrow">Current file</p><h3 id="content-heading">Content</h3></div><div class="content-tabs" role="tablist" aria-label="Asset content format"><button type="button" role="tab" :aria-selected="detailTab === 'RENDERED'" @click="detailTab = 'RENDERED'">Rendered</button><button type="button" role="tab" :aria-selected="detailTab === 'RAW'" @click="detailTab = 'RAW'">Raw Markdown</button><button type="button" role="tab" :aria-selected="detailTab === 'FRONTMATTER'" @click="detailTab = 'FRONTMATTER'">Frontmatter</button></div></div><div v-if="detailTab === 'RENDERED'" class="markdown-body" role="tabpanel" v-html="assetDetail.renderedMarkdown"></div><pre v-else-if="detailTab === 'RAW'" class="source-view" role="tabpanel">{{ assetDetail.rawMarkdown }}</pre><pre v-else class="source-view" role="tabpanel">{{ frontmatterText(assetDetail.frontmatter) }}</pre></section>
-            <section class="loadout-section" aria-labelledby="loadout-heading"><div class="section-heading"><div><p class="eyebrow">Most recent references</p><h3 id="loadout-heading">Task Loadouts</h3></div><span>{{ assetDetail.recentLoadouts.length }} shown</span></div><div v-if="assetDetail.recentLoadouts.length === 0" class="state-panel compact"><p>This Asset has not appeared in a recorded Task Loadout.</p></div><div v-else class="table-scroll"><table><thead><tr><th>Task</th><th>Request</th><th>State</th><th>Reason</th><th>Usage</th><th>Updated</th></tr></thead><tbody><tr v-for="loadout in assetDetail.recentLoadouts" :key="loadout.taskId"><td><code>{{ loadout.taskId }}</code><small>{{ loadout.workspace ?? 'GLOBAL' }}</small></td><td>{{ loadout.requestSummary }}</td><td><span class="status-label">{{ loadout.status }}</span><small>{{ loadout.mode }}</small></td><td><code>{{ loadout.reason }}</code></td><td>Rcl {{ loadout.recallCount }} · Rd {{ loadout.readCount }} · {{ loadout.usedFlag ? 'Used' : 'Not used' }}</td><td><time :datetime="loadout.updatedAt">{{ formatDate(loadout.updatedAt) }}</time></td></tr></tbody></table></div></section>
-          </div>
-          <div v-else class="state-panel detail-state"><strong>Select an Asset</strong><p>Choose an item from the Library to read its current file and Usage summary.</p></div>
-        </template>
+        <section class="detail-pane" aria-label="所选内容详情">
+          <template v-if="activeView === 'LIBRARY'">
+            <div
+              v-if="detailLoading"
+              class="state-panel detail-state"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="loading-line" aria-hidden="true"></span
+              ><strong>正在打开知识资产…</strong>
+              <p>正在读取正文与使用情况。</p>
+            </div>
+            <div
+              v-else-if="detailError && detailErrorCopy"
+              class="state-panel detail-state error-state"
+              role="alert"
+            >
+              <p class="error-code mono">{{ detailError.code }}</p>
+              <strong>{{ detailErrorCopy.title }}</strong>
+              <p>{{ detailErrorCopy.detail }}</p>
+              <button
+                type="button"
+                class="secondary-button"
+                @click="retryDetail"
+              >
+                {{ detailError.status === 404 ? "刷新资产列表" : "重新加载" }}
+              </button>
+            </div>
+            <div v-else-if="assetDetail" class="detail-document">
+              <header class="document-header">
+                <div class="document-kicker">
+                  <span class="tag">{{ displayValue(assetDetail.type) }}</span
+                  ><span>{{
+                    assetDetail.scope === "GLOBAL"
+                      ? "全局知识"
+                      : assetDetail.workspace
+                  }}</span>
+                </div>
+                <h2>{{ assetDetail.title }}</h2>
+                <p>{{ assetDetail.summary }}</p>
+              </header>
+              <section
+                class="content-section"
+                aria-labelledby="content-heading"
+              >
+                <div class="section-heading content-heading-row">
+                  <div>
+                    <p class="eyebrow">知识原文</p>
+                    <h3 id="content-heading">正文</h3>
+                  </div>
+                  <div
+                    class="content-tabs"
+                    role="tablist"
+                    @keydown="handleTabKeydown"
+                    aria-label="正文显示方式"
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      id="asset-tab-RENDERED"
+                      aria-controls="asset-panel"
+                      :tabindex="detailTab === 'RENDERED' ? 0 : -1"
+                      :aria-selected="detailTab === 'RENDERED'"
+                      @click="detailTab = 'RENDERED'"
+                    >
+                      阅读</button
+                    ><button
+                      type="button"
+                      role="tab"
+                      id="asset-tab-RAW"
+                      aria-controls="asset-panel"
+                      :tabindex="detailTab === 'RAW' ? 0 : -1"
+                      :aria-selected="detailTab === 'RAW'"
+                      @click="detailTab = 'RAW'"
+                    >
+                      Markdown 源文</button
+                    ><button
+                      type="button"
+                      role="tab"
+                      id="asset-tab-FRONTMATTER"
+                      aria-controls="asset-panel"
+                      :tabindex="detailTab === 'FRONTMATTER' ? 0 : -1"
+                      :aria-selected="detailTab === 'FRONTMATTER'"
+                      @click="detailTab = 'FRONTMATTER'"
+                    >
+                      元信息
+                    </button>
+                  </div>
+                </div>
+                <div
+                  v-if="detailTab === 'RENDERED'"
+                  class="markdown-body"
+                  role="tabpanel"
+                  id="asset-panel"
+                  :aria-labelledby="`asset-tab-${detailTab}`"
+                  tabindex="0"
+                  v-html="assetDetail.renderedMarkdown"
+                ></div>
+                <pre
+                  v-else-if="detailTab === 'RAW'"
+                  class="source-view"
+                  role="tabpanel"
+                  id="asset-panel"
+                  :aria-labelledby="`asset-tab-${detailTab}`"
+                  tabindex="0"
+                  >{{ assetDetail.rawMarkdown }}</pre
+                >
+                <pre
+                  v-else
+                  class="source-view"
+                  role="tabpanel"
+                  id="asset-panel"
+                  :aria-labelledby="`asset-tab-${detailTab}`"
+                  tabindex="0"
+                  >{{ frontmatterText(assetDetail.frontmatter) }}</pre
+                >
+              </section>
+              <details class="detail-disclosure">
+                <summary>属性与使用情况</summary>
+                <dl class="metadata-sheet">
+                  <div>
+                    <dt>资产 ID</dt>
+                    <dd>
+                      <code>{{ assetDetail.assetId }}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>工作区</dt>
+                    <dd>{{ assetDetail.workspace ?? "全局知识" }}</dd>
+                  </div>
+                  <div>
+                    <dt>文件路径</dt>
+                    <dd>
+                      <code>{{ assetDetail.relativePath }}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>修改时间</dt>
+                    <dd>
+                      <time :datetime="assetDetail.modifiedAt">{{
+                        formatDate(assetDetail.modifiedAt)
+                      }}</time>
+                    </dd>
+                  </div>
+                  <div class="wide-row">
+                    <dt>内容 Hash</dt>
+                    <dd>
+                      <code>{{ assetDetail.contentHash }}</code>
+                    </dd>
+                  </div>
+                </dl>
+                <section class="usage-section" aria-labelledby="usage-heading">
+                  <div class="section-heading">
+                    <div>
+                      <p class="eyebrow">使用情况</p>
+                      <h3 id="usage-heading">使用统计</h3>
+                    </div>
+                  </div>
+                  <dl class="usage-strip">
+                    <div>
+                      <dt>关联任务</dt>
+                      <dd>{{ assetDetail.usageSummary.taskCount }}</dd>
+                    </div>
+                    <div>
+                      <dt>召回</dt>
+                      <dd>{{ assetDetail.usageSummary.recallCount }}</dd>
+                    </div>
+                    <div>
+                      <dt>读取</dt>
+                      <dd>{{ assetDetail.usageSummary.readCount }}</dd>
+                    </div>
+                    <div>
+                      <dt>实际使用任务</dt>
+                      <dd>{{ assetDetail.usageSummary.usedTaskCount }}</dd>
+                    </div>
+                  </dl>
+                </section>
+                <section
+                  class="loadout-section"
+                  aria-labelledby="loadout-heading"
+                >
+                  <div class="section-heading">
+                    <div>
+                      <p class="eyebrow">最近关联</p>
+                      <h3 id="loadout-heading">任务与装载</h3>
+                    </div>
+                    <span>{{ assetDetail.recentLoadouts.length }} 条</span>
+                  </div>
+                  <div
+                    v-if="assetDetail.recentLoadouts.length === 0"
+                    class="state-panel compact"
+                  >
+                    <p>该资产尚未出现在已记录的任务装载中。</p>
+                  </div>
+                  <div v-else class="table-scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>任务</th>
+                          <th>任务内容</th>
+                          <th>状态</th>
+                          <th>装载原因</th>
+                          <th>使用记录</th>
+                          <th>更新时间</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr
+                          v-for="loadout in assetDetail.recentLoadouts"
+                          :key="loadout.taskId"
+                        >
+                          <td>
+                            <code>{{ loadout.taskId }}</code
+                            ><small>{{
+                              loadout.workspace ?? "全局知识"
+                            }}</small>
+                          </td>
+                          <td>{{ loadout.requestSummary }}</td>
+                          <td>
+                            <span class="status-label">{{
+                              displayValue(loadout.status)
+                            }}</span
+                            ><small>{{ displayValue(loadout.mode) }}</small>
+                          </td>
+                          <td>
+                            <code>{{ loadout.reason }}</code>
+                          </td>
+                          <td>
+                            召回 {{ loadout.recallCount }} · 读取
+                            {{ loadout.readCount }} ·
+                            {{ loadout.usedFlag ? "已使用" : "未使用" }}
+                          </td>
+                          <td>
+                            <time :datetime="loadout.updatedAt">{{
+                              formatDate(loadout.updatedAt)
+                            }}</time>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </details>
+            </div>
+            <div v-else class="state-panel detail-state">
+              <strong>选择一条知识</strong>
+              <p>从左侧列表选择知识，查看正文与使用情况。</p>
+            </div>
+          </template>
 
-        <template v-else>
-          <div v-if="inboxLoading" class="state-panel detail-state" role="status" aria-live="polite"><span class="loading-line" aria-hidden="true"></span><strong>Scanning Inbox…</strong></div>
-          <div v-else-if="inboxError && inboxErrorCopy" class="state-panel detail-state error-state" role="alert"><p class="error-code mono">{{ inboxError.code }}</p><strong>{{ inboxErrorCopy.title }}</strong><p>{{ inboxErrorCopy.detail }}</p><button type="button" class="secondary-button" @click="loadInbox">Retry</button></div>
-          <article v-else-if="selectedInboxItem" class="detail-document inbox-document"><header class="document-header"><div class="document-kicker"><span class="tag">CANDIDATE</span><span>{{ selectedInboxItem.type }}</span></div><h2>{{ selectedInboxItem.title }}</h2><p>{{ selectedInboxItem.summary }}</p></header><dl class="metadata-sheet"><div><dt>Asset ID</dt><dd><code>{{ selectedInboxItem.assetId }}</code></dd></div><div><dt>Scope</dt><dd>{{ selectedInboxItem.scope }}</dd></div><div><dt>Workspace</dt><dd>{{ selectedInboxItem.workspace ?? 'GLOBAL' }}</dd></div><div><dt>Modified</dt><dd>{{ formatDate(selectedInboxItem.modifiedAt) }}</dd></div><div class="wide-row"><dt>Path</dt><dd><code>{{ selectedInboxItem.relativePath }}</code></dd></div><div class="wide-row"><dt>Content Hash</dt><dd><code>{{ selectedInboxItem.contentHash }}</code></dd></div></dl><section class="content-section"><div class="section-heading content-heading-row"><div><p class="eyebrow">Read-only candidate</p><h3>Source</h3></div><div class="content-tabs" role="tablist" aria-label="Inbox candidate format"><button type="button" role="tab" :aria-selected="inboxDetailTab === 'RAW'" @click="inboxDetailTab = 'RAW'">Raw Markdown</button><button type="button" role="tab" :aria-selected="inboxDetailTab === 'FRONTMATTER'" @click="inboxDetailTab = 'FRONTMATTER'">Frontmatter</button></div></div><pre v-if="inboxDetailTab === 'RAW'" class="source-view" role="tabpanel">{{ selectedInboxItem.rawMarkdown }}</pre><pre v-else class="source-view" role="tabpanel">{{ frontmatterText(selectedInboxItem.frontmatter) }}</pre></section></article>
-          <article v-else-if="selectedInboxDiagnostic" class="detail-document diagnostic-document"><header class="document-header"><div class="document-kicker"><span class="tag warning">SCANNER DIAGNOSTIC</span></div><h2 class="mono">{{ selectedInboxDiagnostic.code }}</h2><p>{{ selectedInboxDiagnostic.message }}</p></header><dl class="metadata-sheet single-column"><div><dt>Relative path</dt><dd><code>{{ selectedInboxDiagnostic.relativePath }}</code></dd></div><div v-if="selectedInboxDiagnostic.assetId"><dt>Asset ID</dt><dd><code>{{ selectedInboxDiagnostic.assetId }}</code></dd></div></dl><div class="boundary-note"><strong>No action is available here.</strong><p>Resolve the source file outside the Hub, then refresh the Inbox scan.</p></div></article>
-          <div v-else class="state-panel detail-state"><strong>Nothing selected</strong><p>Inbox candidates and Scanner diagnostics will appear here when present.</p></div>
-        </template>
-      </section>
-    </main>
-    <TaskLoadoutsView v-else-if="primaryView === 'TASK_LOADOUTS'" />
-    <UsageView v-else-if="primaryView === 'USAGE'" />
-    <SystemStatusView v-else />
+          <template v-else>
+            <div
+              v-if="inboxLoading"
+              class="state-panel detail-state"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="loading-line" aria-hidden="true"></span
+              ><strong>正在读取收件箱…</strong>
+            </div>
+            <div
+              v-else-if="inboxError && inboxErrorCopy"
+              class="state-panel detail-state error-state"
+              role="alert"
+            >
+              <p class="error-code mono">{{ inboxError.code }}</p>
+              <strong>{{ inboxErrorCopy.title }}</strong>
+              <p>{{ inboxErrorCopy.detail }}</p>
+              <button type="button" class="secondary-button" @click="loadInbox">
+                重试
+              </button>
+            </div>
+            <article
+              v-else-if="selectedInboxItem"
+              class="detail-document inbox-document"
+            >
+              <header class="document-header">
+                <div class="document-kicker">
+                  <span class="tag">待确认</span
+                  ><span>{{ displayValue(selectedInboxItem.type) }}</span>
+                </div>
+                <h2>{{ selectedInboxItem.title }}</h2>
+                <p>{{ selectedInboxItem.summary }}</p>
+              </header>
+
+              <section class="content-section">
+                <div class="section-heading content-heading-row">
+                  <div>
+                    <p class="eyebrow">候选原文</p>
+                    <h3>源文件</h3>
+                  </div>
+                  <div
+                    class="content-tabs"
+                    role="tablist"
+                    @keydown="handleTabKeydown"
+                    aria-label="候选显示方式"
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      id="inbox-tab-RAW"
+                      aria-controls="inbox-panel"
+                      :tabindex="inboxDetailTab === 'RAW' ? 0 : -1"
+                      :aria-selected="inboxDetailTab === 'RAW'"
+                      @click="inboxDetailTab = 'RAW'"
+                    >
+                      Markdown 源文</button
+                    ><button
+                      type="button"
+                      role="tab"
+                      id="inbox-tab-FRONTMATTER"
+                      aria-controls="inbox-panel"
+                      :tabindex="inboxDetailTab === 'FRONTMATTER' ? 0 : -1"
+                      :aria-selected="inboxDetailTab === 'FRONTMATTER'"
+                      @click="inboxDetailTab = 'FRONTMATTER'"
+                    >
+                      元信息
+                    </button>
+                  </div>
+                </div>
+                <pre
+                  v-if="inboxDetailTab === 'RAW'"
+                  class="source-view"
+                  role="tabpanel"
+                  id="inbox-panel"
+                  :aria-labelledby="`inbox-tab-${inboxDetailTab}`"
+                  tabindex="0"
+                  >{{ selectedInboxItem.rawMarkdown }}</pre
+                >
+                <pre
+                  v-else
+                  class="source-view"
+                  role="tabpanel"
+                  id="inbox-panel"
+                  :aria-labelledby="`inbox-tab-${inboxDetailTab}`"
+                  tabindex="0"
+                  >{{ frontmatterText(selectedInboxItem.frontmatter) }}</pre
+                >
+              </section>
+
+              <details class="detail-disclosure">
+                <summary>候选属性</summary>
+                <dl class="metadata-sheet">
+                  <div>
+                    <dt>资产 ID</dt>
+                    <dd>
+                      <code>{{ selectedInboxItem.assetId }}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>范围</dt>
+                    <dd>{{ displayValue(selectedInboxItem.scope) }}</dd>
+                  </div>
+                  <div>
+                    <dt>工作区</dt>
+                    <dd>{{ selectedInboxItem.workspace ?? "全局知识" }}</dd>
+                  </div>
+                  <div>
+                    <dt>修改时间</dt>
+                    <dd>{{ formatDate(selectedInboxItem.modifiedAt) }}</dd>
+                  </div>
+                  <div class="wide-row">
+                    <dt>文件路径</dt>
+                    <dd>
+                      <code>{{ selectedInboxItem.relativePath }}</code>
+                    </dd>
+                  </div>
+                  <div class="wide-row">
+                    <dt>内容 Hash</dt>
+                    <dd>
+                      <code>{{ selectedInboxItem.contentHash }}</code>
+                    </dd>
+                  </div>
+                </dl>
+              </details>
+            </article>
+            <article
+              v-else-if="selectedInboxDiagnostic"
+              class="detail-document diagnostic-document"
+            >
+              <header class="document-header">
+                <div class="document-kicker">
+                  <span class="tag warning">文件诊断</span>
+                </div>
+                <h2 class="mono">{{ selectedInboxDiagnostic.code }}</h2>
+                <p>{{ selectedInboxDiagnostic.message }}</p>
+              </header>
+              <dl class="metadata-sheet single-column">
+                <div>
+                  <dt>相对路径</dt>
+                  <dd>
+                    <code>{{ selectedInboxDiagnostic.relativePath }}</code>
+                  </dd>
+                </div>
+                <div v-if="selectedInboxDiagnostic.assetId">
+                  <dt>资产 ID</dt>
+                  <dd>
+                    <code>{{ selectedInboxDiagnostic.assetId }}</code>
+                  </dd>
+                </div>
+              </dl>
+              <div class="boundary-note">
+                <strong>请在源文件中处理</strong>
+                <p>处理文件问题后，刷新收件箱查看结果。</p>
+              </div>
+            </article>
+            <div v-else class="state-panel detail-state">
+              <strong>等待选择</strong>
+              <p>选择左侧候选或诊断信息，查看详情。</p>
+            </div>
+          </template>
+        </section>
+      </main>
+      <TaskLoadoutsView v-else-if="primaryView === 'TASK_LOADOUTS'" />
+      <UsageView v-else-if="primaryView === 'USAGE'" />
+      <SystemStatusView v-else />
+    </div>
   </div>
 </template>

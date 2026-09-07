@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { displayValue } from "./view-helpers.js";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
-import { HubApiClient, HubApiError, isAbortError } from "../api/client";
-import type { SystemReadiness, SystemStatus } from "../api/types";
-import { asHubApiError, formatDate, presentReadError } from "./view-helpers";
+import { HubApiClient, HubApiError, isAbortError } from "../api/client.js";
+import type { SystemReadiness, SystemStatus } from "../api/types.js";
+import { asHubApiError, formatDate, presentReadError } from "./view-helpers.js";
 
 const api = new HubApiClient();
 const status = ref<SystemStatus>();
@@ -13,7 +14,9 @@ const error = ref<HubApiError>();
 let request = 0;
 let controller: AbortController | undefined;
 
-const errorCopy = computed(() => presentReadError(error.value, "SYSTEM_STATUS"));
+const errorCopy = computed(() =>
+  presentReadError(error.value, "SYSTEM_STATUS"),
+);
 
 onMounted(() => void loadStatus());
 onBeforeUnmount(() => controller?.abort());
@@ -47,11 +50,11 @@ function readinessClass(readiness: SystemReadiness): string {
 }
 
 function formatCount(value: number | null): string {
-  return value === null ? "Unknown / unavailable" : String(value);
+  return value === null ? "未知 / 不可用" : String(value);
 }
 
 function formatOptionalDate(value: string | null): string {
-  return value === null ? "Unknown / unavailable" : formatDate(value);
+  return value === null ? "未知 / 不可用" : formatDate(value);
 }
 
 function formatUptime(seconds: number): string {
@@ -60,76 +63,239 @@ function formatUptime(seconds: number): string {
   const hours = Math.floor((wholeSeconds % 86_400) / 3_600);
   const minutes = Math.floor((wholeSeconds % 3_600) / 60);
   const remainder = wholeSeconds % 60;
-  return [days > 0 ? `${days}d` : "", hours > 0 ? `${hours}h` : "", minutes > 0 ? `${minutes}m` : "", `${remainder}s`]
+  return [
+    days > 0 ? `${days}天` : "",
+    hours > 0 ? `${hours}时` : "",
+    minutes > 0 ? `${minutes}分` : "",
+    `${remainder}秒`,
+  ]
     .filter((part) => part.length > 0)
     .join(" ");
 }
 </script>
 
 <template>
-  <main class="report-workbench status-report" aria-labelledby="system-status-heading">
+  <main
+    class="report-workbench status-report"
+    aria-labelledby="system-status-heading"
+  >
     <header class="report-header">
-      <div><p class="eyebrow">Current process report</p><h2 id="system-status-heading">System Status</h2></div>
-      <button type="button" class="secondary-button" @click="loadStatus">Refresh status</button>
+      <div>
+        <p class="eyebrow">当前运行状态</p>
+        <h2 id="system-status-heading">系统状态</h2>
+      </div>
+      <button type="button" class="secondary-button" @click="loadStatus">
+        刷新状态
+      </button>
     </header>
-    <p class="supporting-copy report-intro">Calculated on request from the running service, repository scan, index, watcher, and local endpoint. This view does not poll or keep history.</p>
+    <p class="supporting-copy report-intro">
+      查看本地服务、知识仓库与索引的当前状态。点击刷新获取最新结果。
+    </p>
 
-    <div v-if="loading" class="state-panel status-state" role="status" aria-live="polite"><span class="loading-line" aria-hidden="true"></span><strong>Calculating current status…</strong></div>
-    <div v-else-if="error && errorCopy" class="state-panel status-state error-state" role="alert"><p class="error-code mono">{{ error.code }}</p><strong>{{ errorCopy.title }}</strong><p>{{ errorCopy.detail }}</p><button type="button" class="secondary-button" @click="loadStatus">Retry</button></div>
+    <div
+      v-if="loading"
+      class="state-panel status-state"
+      role="status"
+      aria-live="polite"
+    >
+      <span class="loading-line" aria-hidden="true"></span
+      ><strong>正在读取系统状态…</strong>
+    </div>
+    <div
+      v-else-if="error && errorCopy"
+      class="state-panel status-state error-state"
+      role="alert"
+    >
+      <p class="error-code mono">{{ error.code }}</p>
+      <strong>{{ errorCopy.title }}</strong>
+      <p>{{ errorCopy.detail }}</p>
+      <button type="button" class="secondary-button" @click="loadStatus">
+        重试
+      </button>
+    </div>
     <article v-else-if="status" class="status-sheet">
       <header class="status-verdict">
-        <div><p class="eyebrow">Service readiness</p><h3>{{ status.service.name }} <span>{{ status.service.version }}</span></h3></div>
-        <span class="readiness-label" :class="readinessClass(status.service.readiness)">{{ status.service.readiness }}</span>
+        <div>
+          <p class="eyebrow">服务状态</p>
+          <h3>
+            {{ status.service.name }} <span>{{ status.service.version }}</span>
+          </h3>
+        </div>
+        <span
+          class="readiness-label"
+          :class="readinessClass(status.service.readiness)"
+          >{{ displayValue(status.service.readiness) }}</span
+        >
       </header>
 
       <section aria-labelledby="service-status-section">
-        <div class="section-heading"><div><p class="eyebrow">Runtime</p><h3 id="service-status-section">Service</h3></div></div>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">本地运行</p>
+            <h3 id="service-status-section">服务</h3>
+          </div>
+        </div>
         <dl class="status-definition-list">
-          <div><dt>Name</dt><dd>{{ status.service.name }}</dd></div>
-          <div><dt>Version</dt><dd>{{ status.service.version }}</dd></div>
-          <div><dt>Uptime</dt><dd>{{ formatUptime(status.service.uptimeSeconds) }} <small>({{ status.service.uptimeSeconds }} seconds)</small></dd></div>
-          <div><dt>Readiness</dt><dd><span class="readiness-label" :class="readinessClass(status.service.readiness)">{{ status.service.readiness }}</span></dd></div>
+          <div>
+            <dt>名称</dt>
+            <dd>{{ status.service.name }}</dd>
+          </div>
+          <div>
+            <dt>版本</dt>
+            <dd>{{ status.service.version }}</dd>
+          </div>
+          <div>
+            <dt>运行时长</dt>
+            <dd>
+              {{ formatUptime(status.service.uptimeSeconds) }}
+              <small>({{ status.service.uptimeSeconds }} 秒)</small>
+            </dd>
+          </div>
+          <div>
+            <dt>就绪状态</dt>
+            <dd>
+              <span
+                class="readiness-label"
+                :class="readinessClass(status.service.readiness)"
+                >{{ displayValue(status.service.readiness) }}</span
+              >
+            </dd>
+          </div>
         </dl>
       </section>
 
       <section aria-labelledby="repository-status-section">
-        <div class="section-heading"><div><p class="eyebrow">Current files</p><h3 id="repository-status-section">Repository</h3></div></div>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">知识原件</p>
+            <h3 id="repository-status-section">知识仓库</h3>
+          </div>
+        </div>
         <dl class="status-definition-list">
-          <div class="status-wide-row"><dt>Asset Repository path</dt><dd><code>{{ status.repository.assetRepositoryPath }}</code></dd></div>
-          <div><dt>Formal Assets</dt><dd>{{ formatCount(status.repository.formalAssetCount) }}</dd></div>
-          <div><dt>Inbox Assets</dt><dd>{{ formatCount(status.repository.inboxAssetCount) }}</dd></div>
+          <div class="status-wide-row">
+            <dt>知识仓库路径</dt>
+            <dd>
+              <code>{{ status.repository.assetRepositoryPath }}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>正式资产</dt>
+            <dd>{{ formatCount(status.repository.formalAssetCount) }}</dd>
+          </div>
+          <div>
+            <dt>候选资产</dt>
+            <dd>{{ formatCount(status.repository.inboxAssetCount) }}</dd>
+          </div>
         </dl>
       </section>
 
       <section aria-labelledby="index-status-section">
-        <div class="section-heading"><div><p class="eyebrow">Projection health</p><h3 id="index-status-section">Index</h3></div></div>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">派生索引</p>
+            <h3 id="index-status-section">索引</h3>
+          </div>
+        </div>
         <dl class="status-definition-list">
-          <div><dt>Catalog count</dt><dd>{{ formatCount(status.index.catalogCount) }}</dd></div>
-          <div><dt>FTS count</dt><dd>{{ formatCount(status.index.ftsCount) }}</dd></div>
-          <div><dt>Last successful scan</dt><dd>{{ formatOptionalDate(status.index.lastSuccessfulScanAt) }}</dd></div>
-          <div><dt>Watcher state</dt><dd>{{ status.index.watcherState }}</dd></div>
-          <div><dt>Index state</dt><dd><span class="readiness-label" :class="readinessClass(status.index.indexState)">{{ status.index.indexState }}</span></dd></div>
-          <div><dt>Rebuild required</dt><dd>{{ status.index.rebuildRequired ? 'YES' : 'NO' }}</dd></div>
+          <div>
+            <dt>目录条目</dt>
+            <dd>{{ formatCount(status.index.catalogCount) }}</dd>
+          </div>
+          <div>
+            <dt>全文索引条目</dt>
+            <dd>{{ formatCount(status.index.ftsCount) }}</dd>
+          </div>
+          <div>
+            <dt>最近成功扫描</dt>
+            <dd>{{ formatOptionalDate(status.index.lastSuccessfulScanAt) }}</dd>
+          </div>
+          <div>
+            <dt>文件监听状态</dt>
+            <dd>{{ displayValue(status.index.watcherState) }}</dd>
+          </div>
+          <div>
+            <dt>索引状态</dt>
+            <dd>
+              <span
+                class="readiness-label"
+                :class="readinessClass(status.index.indexState)"
+                >{{ displayValue(status.index.indexState) }}</span
+              >
+            </dd>
+          </div>
+          <div>
+            <dt>需要重建</dt>
+            <dd>{{ status.index.rebuildRequired ? "是" : "否" }}</dd>
+          </div>
         </dl>
       </section>
 
       <section aria-labelledby="mcp-status-section">
-        <div class="section-heading"><div><p class="eyebrow">Local HTTP surface</p><h3 id="mcp-status-section">MCP Endpoint</h3></div></div>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">连接入口</p>
+            <h3 id="mcp-status-section">MCP 端点</h3>
+          </div>
+        </div>
         <dl class="status-definition-list">
-          <div><dt>Path</dt><dd><code>{{ status.mcpEndpoint.path }}</code></dd></div>
-          <div><dt>Endpoint ready</dt><dd>{{ status.mcpEndpoint.ready ? 'YES' : 'NO' }}</dd></div>
+          <div>
+            <dt>端点路径</dt>
+            <dd>
+              <code>{{ status.mcpEndpoint.path }}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>端点就绪</dt>
+            <dd>{{ status.mcpEndpoint.ready ? "是" : "否" }}</dd>
+          </div>
         </dl>
-        <p class="boundary-note endpoint-boundary"><strong>Endpoint scope</strong><span>This only reports whether the local <code>/mcp</code> endpoint is ready. It does not claim that any Codex client is connected.</span></p>
+        <p class="boundary-note endpoint-boundary">
+          <strong>连接说明</strong
+          ><span
+            >这里只表示本地 <code>/mcp</code> 端点是否就绪，不代表 Codex
+            客户端已连接。</span
+          >
+        </p>
       </section>
 
       <section aria-labelledby="diagnostics-status-section">
-        <div class="section-heading"><div><p class="eyebrow">Service-provided order</p><h3 id="diagnostics-status-section">Diagnostics</h3></div><span>{{ status.diagnostics.length }} shown</span></div>
-        <div v-if="status.diagnostics.length === 0" class="state-panel compact"><strong>No diagnostics</strong><p>The current calculated response contains no diagnostic rows.</p></div>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">当前诊断</p>
+            <h3 id="diagnostics-status-section">诊断信息</h3>
+          </div>
+          <span>{{ status.diagnostics.length }} 条</span>
+        </div>
+        <div v-if="status.diagnostics.length === 0" class="state-panel compact">
+          <strong>暂无诊断问题</strong>
+          <p>本次检查没有返回诊断信息。</p>
+        </div>
         <ol v-else class="status-diagnostics">
-          <li v-for="(diagnostic, index) in status.diagnostics" :key="`${diagnostic.source}:${diagnostic.relativePath ?? ''}:${diagnostic.code}:${index}`">
-            <div><span class="tag warning">{{ diagnostic.source }}</span><code>{{ diagnostic.code }}</code></div>
+          <li
+            v-for="(diagnostic, index) in status.diagnostics"
+            :key="`${diagnostic.source}:${diagnostic.relativePath ?? ''}:${diagnostic.code}:${index}`"
+          >
+            <div>
+              <span class="tag warning">{{ diagnostic.source }}</span
+              ><code>{{ diagnostic.code }}</code>
+            </div>
             <p>{{ diagnostic.message }}</p>
-            <dl><div v-if="diagnostic.relativePath"><dt>Relative path</dt><dd><code>{{ diagnostic.relativePath }}</code></dd></div><div v-if="diagnostic.occurredAt"><dt>Occurred</dt><dd><time :datetime="diagnostic.occurredAt">{{ formatDate(diagnostic.occurredAt) }}</time></dd></div></dl>
+            <dl>
+              <div v-if="diagnostic.relativePath">
+                <dt>相对路径</dt>
+                <dd>
+                  <code>{{ diagnostic.relativePath }}</code>
+                </dd>
+              </div>
+              <div v-if="diagnostic.occurredAt">
+                <dt>发生时间</dt>
+                <dd>
+                  <time :datetime="diagnostic.occurredAt">{{
+                    formatDate(diagnostic.occurredAt)
+                  }}</time>
+                </dd>
+              </div>
+            </dl>
           </li>
         </ol>
       </section>

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 
-import { HubApiClient, HubApiError, isAbortError } from "../api/client";
-import type { UsageListFilters, UsageListItem } from "../api/types";
+import { HubApiClient, HubApiError, isAbortError } from "../api/client.js";
+import type { UsageListFilters, UsageListItem } from "../api/types.js";
 import {
   asHubApiError,
   displayWorkspace,
   formatDate,
   presentReadError,
-} from "./view-helpers";
+} from "./view-helpers.js";
 
 type WorkspaceMode = "ALL" | "NULL" | "NAMED";
 
@@ -25,30 +25,36 @@ const appliedFilters = ref<UsageListFilters>({ limit: 20 });
 const usages = ref<UsageListItem[]>([]);
 const loading = ref(false);
 const error = ref<HubApiError>();
-const selectedUsageId = ref<string>();
 
 let request = 0;
 let controller: AbortController | undefined;
 
 const errorCopy = computed(() => presentReadError(error.value, "USAGE_LIST"));
 const workspaceSuggestions = computed(() =>
-  [...new Set(usages.value.flatMap((usage) => usage.workspace === null ? [] : [usage.workspace]))]
-    .sort((left, right) => left.localeCompare(right)),
+  [
+    ...new Set(
+      usages.value.flatMap((usage) =>
+        usage.workspace === null ? [] : [usage.workspace],
+      ),
+    ),
+  ].sort((left, right) => left.localeCompare(right)),
 );
 const appliedSummary = computed(() => {
   const values: string[] = [];
   if (appliedFilters.value.taskId !== undefined) {
-    values.push(`Task ${appliedFilters.value.taskId}`);
+    values.push(`任务 ${appliedFilters.value.taskId}`);
   }
   if (appliedFilters.value.assetId !== undefined) {
-    values.push(`Asset ${appliedFilters.value.assetId}`);
+    values.push(`资产 ${appliedFilters.value.assetId}`);
   }
   if (Object.hasOwn(appliedFilters.value, "workspace")) {
-    values.push(appliedFilters.value.workspace === null
-      ? "Workspace NULL"
-      : `Workspace ${appliedFilters.value.workspace}`);
+    values.push(
+      appliedFilters.value.workspace === null
+        ? "未绑定工作区"
+        : `工作区 ${appliedFilters.value.workspace}`,
+    );
   }
-  return values.length === 0 ? "All Usage rows" : values.join(" AND ");
+  return values.length === 0 ? "全部使用记录" : values.join(" · ");
 });
 
 onMounted(() => void loadUsages({ limit: 20 }));
@@ -60,23 +66,25 @@ function setWorkspaceMode(mode: WorkspaceMode): void {
 
 function validateOptionalExact(value: string, label: string): boolean {
   if (value.length > 0 && value !== value.trim()) {
-    filterError.value = `${label} cannot start or end with spaces.`;
+    filterError.value = `${label}首尾不能包含空格。`;
     return false;
   }
   return true;
 }
 
 function currentFilters(): UsageListFilters | undefined {
-  if (!validateOptionalExact(filters.taskId, "Task ID") ||
-      !validateOptionalExact(filters.assetId, "Asset ID")) {
+  if (
+    !validateOptionalExact(filters.taskId, "任务 ID") ||
+    !validateOptionalExact(filters.assetId, "资产 ID")
+  ) {
     return undefined;
   }
   if (workspaceMode.value === "NAMED") {
     if (filters.workspace.length === 0) {
-      filterError.value = "Enter an exact Workspace name.";
+      filterError.value = "请输入准确的工作区名称。";
       return undefined;
     }
-    if (!validateOptionalExact(filters.workspace, "Workspace name")) {
+    if (!validateOptionalExact(filters.workspace, "工作区名称")) {
       return undefined;
     }
   }
@@ -128,14 +136,11 @@ async function loadUsages(requestFilters: UsageListFilters): Promise<void> {
       return;
     }
     usages.value = result.items;
-    const retained = result.items.some(({ usageId }) => usageId === selectedUsageId.value);
-    selectedUsageId.value = retained ? selectedUsageId.value : result.items[0]?.usageId;
   } catch (caught) {
     if (requestId !== request || isAbortError(caught)) {
       return;
     }
     usages.value = [];
-    selectedUsageId.value = undefined;
     error.value = asHubApiError(caught);
   } finally {
     if (requestId === request) {
@@ -148,68 +153,191 @@ async function loadUsages(requestFilters: UsageListFilters): Promise<void> {
 <template>
   <main class="report-workbench" aria-labelledby="usage-view-heading">
     <header class="report-header">
-      <div><p class="eyebrow">Non-canonical telemetry</p><h2 id="usage-view-heading">Usage</h2></div>
-      <button type="button" class="secondary-button" @click="refreshUsages">Refresh Usage</button>
+      <div>
+        <p class="eyebrow">知识使用情况</p>
+        <h2 id="usage-view-heading">使用记录</h2>
+      </div>
+      <button type="button" class="secondary-button" @click="refreshUsages">
+        刷新记录
+      </button>
     </header>
-    <p class="supporting-copy report-intro">Recall, Read, Used, and Asset availability are shown as separate service facts. No score or trend is inferred.</p>
+    <p class="supporting-copy report-intro">
+      分别展示知识的召回次数、读取次数与实际使用情况。
+    </p>
 
-    <form class="filter-panel report-filters" aria-label="Filter Usage" @submit.prevent="applyFilters">
+    <form
+      class="filter-panel report-filters"
+      aria-label="筛选使用记录"
+      @submit.prevent="applyFilters"
+    >
       <div class="filter-row usage-id-filters">
-        <label><span>Task ID</span><input v-model="filters.taskId" autocomplete="off" placeholder="Exact tsk… ID" /></label>
-        <label><span>Asset ID</span><input v-model="filters.assetId" autocomplete="off" placeholder="Exact ast… ID" /></label>
-        <label><span>Limit</span><select v-model="filters.limit"><option :value="20">20</option><option :value="50">50</option><option :value="100">100</option></select></label>
+        <label
+          ><span>任务 ID</span
+          ><input
+            v-model="filters.taskId"
+            autocomplete="off"
+            placeholder="输入完整 tsk… ID"
+        /></label>
+        <label
+          ><span>资产 ID</span
+          ><input
+            v-model="filters.assetId"
+            autocomplete="off"
+            placeholder="输入完整 ast… ID"
+        /></label>
+        <label
+          ><span>显示条数</span
+          ><select v-model="filters.limit">
+            <option :value="20">20</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+          </select></label
+        >
       </div>
       <fieldset class="workspace-filter usage-workspace-filter">
-        <legend>Task Workspace</legend>
+        <legend>任务工作区</legend>
         <div class="segmented-control">
-          <button type="button" :aria-pressed="workspaceMode === 'ALL'" @click="setWorkspaceMode('ALL')">All</button>
-          <button type="button" :aria-pressed="workspaceMode === 'NULL'" @click="setWorkspaceMode('NULL')">NULL only</button>
-          <button type="button" :aria-pressed="workspaceMode === 'NAMED'" @click="setWorkspaceMode('NAMED')">Exact</button>
+          <button
+            type="button"
+            :aria-pressed="workspaceMode === 'ALL'"
+            @click="setWorkspaceMode('ALL')"
+          >
+            全部
+          </button>
+          <button
+            type="button"
+            :aria-pressed="workspaceMode === 'NULL'"
+            @click="setWorkspaceMode('NULL')"
+          >
+            未绑定
+          </button>
+          <button
+            type="button"
+            :aria-pressed="workspaceMode === 'NAMED'"
+            @click="setWorkspaceMode('NAMED')"
+          >
+            指定工作区
+          </button>
         </div>
         <label v-if="workspaceMode === 'NAMED'" class="exact-workspace">
-          <span>Exact Workspace name</span>
-          <input v-model="filters.workspace" list="usage-workspace-suggestions" autocomplete="off" />
-          <datalist id="usage-workspace-suggestions"><option v-for="workspace in workspaceSuggestions" :key="workspace" :value="workspace" /></datalist>
-          <small>Suggestions come only from the current result set.</small>
+          <span>工作区名称</span>
+          <input
+            v-model="filters.workspace"
+            list="usage-workspace-suggestions"
+            autocomplete="off"
+          />
+          <datalist id="usage-workspace-suggestions">
+            <option
+              v-for="workspace in workspaceSuggestions"
+              :key="workspace"
+              :value="workspace"
+            />
+          </datalist>
+          <small>建议名称来自当前结果。</small>
         </label>
       </fieldset>
-      <p v-if="filterError" class="field-error" role="alert">{{ filterError }}</p>
-      <div class="filter-actions"><button type="submit" class="primary-button">Apply filters</button><button type="button" class="quiet-button" @click="resetFilters">Clear</button></div>
+      <p v-if="filterError" class="field-error" role="alert">
+        {{ filterError }}
+      </p>
+      <div class="filter-actions">
+        <button type="submit" class="primary-button">应用筛选</button
+        ><button type="button" class="quiet-button" @click="resetFilters">
+          重置
+        </button>
+      </div>
     </form>
 
     <div class="ledger-heading">
-      <div><p class="eyebrow">Applied query</p><h3>{{ appliedSummary }}</h3></div>
-      <span v-if="!loading && !error" aria-live="polite">{{ usages.length }} shown · no hidden page count</span>
+      <div>
+        <p class="eyebrow">当前筛选</p>
+        <h3>{{ appliedSummary }}</h3>
+      </div>
+      <span v-if="!loading && !error" aria-live="polite"
+        >{{ usages.length }} 条 · 当前返回结果</span
+      >
     </div>
-    <div v-if="loading" class="state-panel compact" role="status" aria-live="polite"><span class="loading-line" aria-hidden="true"></span><p>Reading Usage…</p></div>
-    <div v-else-if="error && errorCopy" class="state-panel compact error-state" role="alert"><strong>{{ errorCopy.title }}</strong><p>{{ errorCopy.detail }}</p><button type="button" class="secondary-button" @click="refreshUsages">Retry</button></div>
-    <div v-else-if="usages.length === 0" class="state-panel compact"><strong>No Usage in this slice</strong><p>Change the exact filters or refresh. The result has no hidden pages.</p></div>
-    <ol v-else class="usage-ledger" role="listbox" aria-label="Usage results">
+    <div
+      v-if="loading"
+      class="state-panel compact"
+      role="status"
+      aria-live="polite"
+    >
+      <span class="loading-line" aria-hidden="true"></span>
+      <p>正在读取使用记录…</p>
+    </div>
+    <div
+      v-else-if="error && errorCopy"
+      class="state-panel compact error-state"
+      role="alert"
+    >
+      <strong>{{ errorCopy.title }}</strong>
+      <p>{{ errorCopy.detail }}</p>
+      <button type="button" class="secondary-button" @click="refreshUsages">
+        重试
+      </button>
+    </div>
+    <div v-else-if="usages.length === 0" class="state-panel compact">
+      <strong>暂无使用记录</strong>
+      <p>调整任务、资产或工作区筛选后重试。</p>
+    </div>
+    <ol v-else class="usage-ledger" aria-label="使用记录结果">
       <li
         v-for="usage in usages"
         :key="usage.usageId"
-        :class="{ selected: selectedUsageId === usage.usageId, missing: usage.assetMissing }"
-        role="option"
-        :aria-selected="selectedUsageId === usage.usageId"
-        tabindex="0"
-        @focus="selectedUsageId = usage.usageId"
-        @click="selectedUsageId = usage.usageId"
-        @keydown.enter="selectedUsageId = usage.usageId"
-        @keydown.space.prevent="selectedUsageId = usage.usageId"
+        :class="{ missing: usage.assetMissing }"
       >
         <div class="usage-record-heading">
-          <div><span class="tag">USAGE</span><code>{{ usage.usageId }}</code></div>
-          <span v-if="usage.assetMissing" class="missing-label">ASSET MISSING</span><span v-else class="available-label">Asset available</span>
+          <div>
+            <span class="tag">使用记录</span><code>{{ usage.usageId }}</code>
+          </div>
+          <span v-if="usage.assetMissing" class="missing-label">资产已缺失</span
+          ><span v-else class="available-label">资产可用</span>
         </div>
         <dl class="usage-facts">
-          <div class="wide-fact"><dt>Task ID</dt><dd><code>{{ usage.taskId }}</code></dd></div>
-          <div class="wide-fact"><dt>Asset ID</dt><dd><code>{{ usage.assetId }}</code></dd></div>
-          <div><dt>Workspace</dt><dd>{{ displayWorkspace(usage.workspace) }}</dd></div>
-          <div><dt>Recall</dt><dd>{{ usage.recallCount }}</dd></div>
-          <div><dt>Read</dt><dd>{{ usage.readCount }}</dd></div>
-          <div><dt>Used fact</dt><dd>{{ usage.usedFlag ? 'USED' : 'NOT USED' }}</dd></div>
-          <div><dt>Created</dt><dd><time :datetime="usage.createdAt">{{ formatDate(usage.createdAt) }}</time></dd></div>
-          <div><dt>Updated</dt><dd><time :datetime="usage.updatedAt">{{ formatDate(usage.updatedAt) }}</time></dd></div>
+          <div class="wide-fact">
+            <dt>任务 ID</dt>
+            <dd>
+              <code>{{ usage.taskId }}</code>
+            </dd>
+          </div>
+          <div class="wide-fact">
+            <dt>资产 ID</dt>
+            <dd>
+              <code>{{ usage.assetId }}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>工作区</dt>
+            <dd>{{ displayWorkspace(usage.workspace) }}</dd>
+          </div>
+          <div>
+            <dt>召回</dt>
+            <dd>{{ usage.recallCount }}</dd>
+          </div>
+          <div>
+            <dt>读取</dt>
+            <dd>{{ usage.readCount }}</dd>
+          </div>
+          <div>
+            <dt>实际使用</dt>
+            <dd>{{ usage.usedFlag ? "已使用" : "未使用" }}</dd>
+          </div>
+          <div>
+            <dt>创建时间</dt>
+            <dd>
+              <time :datetime="usage.createdAt">{{
+                formatDate(usage.createdAt)
+              }}</time>
+            </dd>
+          </div>
+          <div>
+            <dt>更新时间</dt>
+            <dd>
+              <time :datetime="usage.updatedAt">{{
+                formatDate(usage.updatedAt)
+              }}</time>
+            </dd>
+          </div>
         </dl>
       </li>
     </ol>

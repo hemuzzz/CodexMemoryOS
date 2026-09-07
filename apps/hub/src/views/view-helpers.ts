@@ -1,16 +1,20 @@
-import { HubApiError } from "../api/client";
+import { HubApiError } from "../api/client.js";
 
 export interface PresentedError {
   detail: string;
   title: string;
 }
 
-export type ReadViewContext = "SYSTEM_STATUS" | "TASK_DETAIL" | "TASK_LIST" | "USAGE_LIST";
+export type ReadViewContext =
+  | "SYSTEM_STATUS"
+  | "TASK_DETAIL"
+  | "TASK_LIST"
+  | "USAGE_LIST";
 
 export function asHubApiError(error: unknown): HubApiError {
   return error instanceof HubApiError
     ? error
-    : new HubApiError("CLIENT_ERROR", "The view could not be loaded", true, 0);
+    : new HubApiError("CLIENT_ERROR", "无法加载页面", true, 0);
 }
 
 export function presentReadError(
@@ -22,40 +26,41 @@ export function presentReadError(
   }
   if (error.code === "SERVICE_UNREACHABLE") {
     return {
-      title: "Local service is offline",
-      detail: "Start the CodexMemoryOS server, then retry this view.",
+      title: "本地服务未连接",
+      detail: "启动 CodexMemoryOS 服务后重试。",
     };
   }
   if (error.code === "INVALID_RESPONSE") {
     return {
-      title: "Response could not be read",
-      detail: "The local service returned an unexpected response. Check the server and retry.",
+      title: "无法读取服务响应",
+      detail: "服务返回了无法识别的响应，请检查服务后重试。",
     };
   }
   if (context === "TASK_DETAIL" && error.status === 404) {
     return {
-      title: "Task no longer exists",
-      detail: "Refresh the Task list to replace this stale selection.",
+      title: "任务已不存在",
+      detail: "刷新任务列表以获取当前内容。",
     };
   }
   if (error.status === 503) {
-    const subject = context === "SYSTEM_STATUS"
-      ? "System Status"
-      : context === "USAGE_LIST"
-        ? "Usage"
-        : "Task Loadout";
+    const subject =
+      context === "SYSTEM_STATUS"
+        ? "系统状态"
+        : context === "USAGE_LIST"
+          ? "使用记录"
+          : "任务装载";
     return {
-      title: `${subject} is temporarily unavailable`,
-      detail: "The local service is not ready. Retry after it recovers.",
+      title: `${subject}暂时不可用`,
+      detail: "本地服务尚未就绪，请恢复后重试。",
     };
   }
   if (error.status >= 500) {
     return {
-      title: "Local service could not complete the request",
-      detail: "No internal details were exposed. Check the server log, then retry.",
+      title: "本地服务未能完成请求",
+      detail: "请检查服务日志后重试。",
     };
   }
-  return { title: "Request could not be completed", detail: error.message };
+  return { title: "请求未完成", detail: error.message };
 }
 
 export function formatDate(value: string): string {
@@ -63,12 +68,54 @@ export function formatDate(value: string): string {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("zh-CN", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
 }
 
 export function displayWorkspace(workspace: string | null): string {
-  return workspace ?? "No workspace (NULL)";
+  return workspace ?? "未绑定工作区";
+}
+
+const valueLabels: Record<string, string> = {
+  MEMORY: "工程记忆",
+  DOCUMENT: "文档",
+  SKILL: "技能",
+  GLOBAL: "全局知识",
+  WORKSPACE: "工作区",
+  RUNNING: "进行中",
+  COMPLETED: "已完成",
+  CANCELLED: "已取消",
+  READY: "就绪",
+  DEGRADED: "降级运行",
+  REBUILD_REQUIRED: "需要重建",
+  NOT_STARTED: "未启动",
+  STARTING: "启动中",
+  STOPPED: "已停止",
+  DIRECT: "直接注入",
+  ON_DEMAND: "按需读取",
+};
+
+export function displayValue(value: string): string {
+  return valueLabels[value] ?? value;
+}
+
+export function handleTabKeydown(event: KeyboardEvent): void {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const group = event.currentTarget;
+  if (!(group instanceof HTMLElement)) return;
+  const tabs = [...group.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  const index = tabs.findIndex((tab) => tab === event.target);
+  if (index < 0 || tabs.length === 0) return;
+  event.preventDefault();
+  const next =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? tabs.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+          tabs.length;
+  tabs[next]?.focus();
+  tabs[next]?.click();
 }

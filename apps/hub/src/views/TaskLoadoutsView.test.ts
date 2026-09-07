@@ -77,8 +77,8 @@ describe("Task Loadouts view", () => {
     ]);
     expect(wrapper.get(".task-card").attributes("aria-current")).toBe("true");
     expect(wrapper.text()).toContain(summary.request);
-    expect(wrapper.text()).toContain("2 Assets");
-    expect(wrapper.text()).toContain("461 chars");
+    expect(wrapper.text()).toContain("2 条资产");
+    expect(wrapper.text()).toContain("461 字符");
     expect(wrapper.findAll(".sequence-heading code").map((item) => item.text())).toEqual([
       firstAssetId,
       secondAssetId,
@@ -87,20 +87,20 @@ describe("Task Loadouts view", () => {
     expect(wrapper.text()).toContain("DOCUMENT_ON_DEMAND");
     expect(wrapper.text()).toContain("301");
 
-    await buttonNamed(wrapper, "Raw JSON").trigger("click");
+    await buttonNamed(wrapper, "原始 JSON").trigger("click");
     const raw = wrapper.get(".source-view").text();
     expect(raw.indexOf(firstAssetId)).toBeLessThan(raw.indexOf(secondAssetId));
     expect(raw).toContain('"maxInjectedCharacters": 3000');
 
-    await buttonNamed(wrapper, "Associated Usage").trigger("click");
+    await buttonNamed(wrapper, "关联使用").trigger("click");
     expect(wrapper.text()).toContain("usg2034512345678901252");
-    expect(wrapper.text()).toContain("ASSET MISSING");
-    expect(wrapper.text()).toContain("USED");
+    expect(wrapper.text()).toContain("资产已缺失");
+    expect(wrapper.text()).toContain("已使用");
   });
 
   it("applies Workspace, status, and legal limit filters with distinct NULL semantics", async () => {
     const wrapper = await mountLoadedView();
-    await buttonNamed(wrapper, "Exact").trigger("click");
+    await buttonNamed(wrapper, "指定工作区").trigger("click");
     await wrapper.get(".exact-workspace input").setValue("alpha");
     const selects = wrapper.findAll(".filter-row select");
     await selects[0]?.setValue("COMPLETED");
@@ -111,7 +111,7 @@ describe("Task Loadouts view", () => {
       "/api/task-loadouts?workspace=alpha&status=COMPLETED&limit=100"
     )).toBe(true);
 
-    await buttonNamed(wrapper, "NULL only").trigger("click");
+    await buttonNamed(wrapper, "未绑定").trigger("click");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
     expect(fetchMock.mock.calls.some(([input]) => String(input) ===
@@ -157,9 +157,9 @@ describe("Task Loadouts view", () => {
       ? jsonResponse({ ok: false, error: { code: "TASK_NOT_FOUND", message: "private detail", retryable: false } }, 404)
       : jsonResponse({ ok: true, data: { items: [summary] } }));
     const wrapper = await mountLoadedView();
-    expect(wrapper.text()).toContain("Task no longer exists");
+    expect(wrapper.text()).toContain("任务已不存在");
     expect(wrapper.text()).not.toContain("private detail");
-    expect(buttonNamed(wrapper, "Refresh Task list").exists()).toBe(true);
+    expect(buttonNamed(wrapper, "刷新任务列表").exists()).toBe(true);
   });
 
   it.each([503, 500])("shows safe list recovery for HTTP %i", async (status) => {
@@ -169,22 +169,22 @@ describe("Task Loadouts view", () => {
     }, status));
     const wrapper = await mountLoadedView();
     expect(wrapper.text()).toContain(status === 503
-      ? "Task Loadout is temporarily unavailable"
-      : "Local service could not complete the request");
+      ? "任务装载暂时不可用"
+      : "本地服务未能完成请求");
     expect(wrapper.text()).not.toContain("private detail");
-    expect(buttonNamed(wrapper, "Retry").exists()).toBe(true);
+    expect(buttonNamed(wrapper, "重试").exists()).toBe(true);
   });
 
   it("handles network and non-JSON list failures without exposing their bodies", async () => {
     fetchMock.mockRejectedValueOnce(new TypeError("private socket"));
     let wrapper = await mountLoadedView();
-    expect(wrapper.text()).toContain("Local service is offline");
+    expect(wrapper.text()).toContain("本地服务未连接");
     expect(wrapper.text()).not.toContain("private socket");
     wrapper.unmount();
 
     fetchMock.mockResolvedValueOnce(new Response("<html>private proxy</html>", { status: 502 }));
     wrapper = await mountLoadedView();
-    expect(wrapper.text()).toContain("Response could not be read");
+    expect(wrapper.text()).toContain("无法读取服务响应");
     expect(wrapper.text()).not.toContain("private proxy");
   });
 

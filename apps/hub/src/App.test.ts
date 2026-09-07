@@ -1,4 +1,4 @@
-import { flushPromises, mount, type DOMWrapper, type VueWrapper } from "@vue/test-utils";
+import { enableAutoUnmount, flushPromises, mount, type DOMWrapper, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App.vue";
@@ -46,9 +46,13 @@ const assetDetail: AssetDetail = {
   usageSummary: { readCount: 2, recallCount: 3, taskCount: 4, usedTaskCount: 1 },
 };
 
+enableAutoUnmount(afterEach);
+
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 
 beforeEach(() => {
+  localStorage.clear();
+  delete document.documentElement.dataset.theme;
   fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
     const path = String(input);
     if (path === `/api/assets/${assetId}`) {
@@ -67,7 +71,7 @@ afterEach(() => {
 });
 
 describe("Asset Desk", () => {
-  it("switches among the four read-only Hub views without a router", async () => {
+  it("switches among the five read-only Hub views without a router", async () => {
     fetchMock.mockImplementation(async (input) => {
       const path = String(input);
       if (path === "/api/task-loadouts?limit=20") {
@@ -93,23 +97,24 @@ describe("Asset Desk", () => {
     const wrapper = await mountLoadedApp();
     const navigation = wrapper.get(".primary-navigation");
     expect(navigation.findAll("button").map((button) => button.text())).toEqual([
-      "Assets",
-      "Task Loadouts",
-      "Usage",
-      "System Status",
+      "知识资产",
+      "收件箱",
+      "任务与装载",
+      "使用记录",
+      "系统状态",
     ]);
-    expect(buttonNamed(wrapper, "Assets").attributes("aria-current")).toBe("page");
+    expect(buttonNamed(wrapper, "知识资产").attributes("aria-current")).toBe("page");
 
-    await buttonNamed(wrapper, "Task Loadouts").trigger("click");
+    await buttonNamed(wrapper, "任务与装载").trigger("click");
     await flushPromises();
-    expect(wrapper.text()).toContain("No Task Loadouts in this slice");
-    await buttonNamed(wrapper, "Usage").trigger("click");
+    expect(wrapper.text()).toContain("暂无任务装载");
+    await buttonNamed(wrapper, "使用记录").trigger("click");
     await flushPromises();
-    expect(wrapper.text()).toContain("No Usage in this slice");
-    await buttonNamed(wrapper, "System Status").trigger("click");
+    expect(wrapper.text()).toContain("暂无使用记录");
+    await buttonNamed(wrapper, "系统状态").trigger("click");
     await flushPromises();
-    expect(wrapper.text()).toContain("Current process report");
-    expect(buttonNamed(wrapper, "System Status").attributes("aria-current")).toBe("page");
+    expect(wrapper.text()).toContain("当前运行状态");
+    expect(buttonNamed(wrapper, "系统状态").attributes("aria-current")).toBe("page");
   });
 
   it("loads the Library and selected detail, then switches rendered/raw/frontmatter content", async () => {
@@ -118,25 +123,25 @@ describe("Asset Desk", () => {
     expect(wrapper.text()).toContain("Current Asset");
     expect(wrapper.find(".match-snippet").exists()).toBe(false);
     expect(wrapper.find(".markdown-body h1").text()).toBe("Rendered source");
-    expect(wrapper.text()).toContain("Usage summary");
-    expect(wrapper.text()).toContain("Task Loadouts");
+    expect(wrapper.text()).toContain("使用统计");
+    expect(wrapper.text()).toContain("任务与装载");
     expect(wrapper.text()).toContain("DOCUMENT_MATCH");
-    expect(wrapper.text()).toContain("Rcl 3 · Rd 2 · Used");
+    expect(wrapper.text()).toContain("召回 3 · 读取 2 · 已使用");
 
-    await buttonNamed(wrapper, "Raw Markdown").trigger("click");
+    await buttonNamed(wrapper, "Markdown 源文").trigger("click");
     expect(wrapper.find(".source-view").text()).toContain("<script>not rendered here</script>");
     expect(wrapper.find(".source-view script").exists()).toBe(false);
-    await buttonNamed(wrapper, "Frontmatter").trigger("click");
+    await buttonNamed(wrapper, "元信息").trigger("click");
     expect(wrapper.find(".source-view").text()).toContain(`\"id\": \"${assetId}\"`);
 
-    expect(wrapper.text()).not.toMatch(/\b(Create|Edit|Delete|Move|Promote|Confirm)\b/u);
+    expect(wrapper.text()).not.toMatch(/\b(Create|Edit|Delete|Move|Promote|Confirm)\b|新增资产|编辑资产|删除资产|确认入库/u);
     expect(fetchMock.mock.calls.every(([, init]) => (init as RequestInit | undefined)?.method === "GET")).toBe(true);
   });
 
   it("applies exact search filters and only displays match metadata after a query", async () => {
     const wrapper = await mountLoadedApp();
     await wrapper.get('input[type="search"]').setValue("needle");
-    await buttonNamed(wrapper, "Exact").trigger("click");
+    await buttonNamed(wrapper, "指定工作区").trigger("click");
     await wrapper.get(".exact-workspace input").setValue("alpha");
     const selects = wrapper.findAll(".filter-row select");
     await selects[0]?.setValue("DOCUMENT");
@@ -155,7 +160,7 @@ describe("Asset Desk", () => {
     const wrapper = await mountLoadedApp();
     const scope = wrapper.findAll(".filter-row select")[1];
     await scope?.setValue("WORKSPACE");
-    await buttonNamed(wrapper, "GLOBAL only").trigger("click");
+    await buttonNamed(wrapper, "仅全局").trigger("click");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
     const globalPath = String(fetchMock.mock.calls.at(-2)?.[0] ?? fetchMock.mock.calls.at(-1)?.[0]);
@@ -163,7 +168,7 @@ describe("Asset Desk", () => {
     expect(globalPath).not.toContain("scope=WORKSPACE");
 
     await scope?.setValue("GLOBAL");
-    await buttonNamed(wrapper, "Exact").trigger("click");
+    await buttonNamed(wrapper, "指定工作区").trigger("click");
     await wrapper.get(".exact-workspace input").setValue("alpha");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
@@ -210,10 +215,10 @@ describe("Asset Desk", () => {
   });
 
   it.each([
-    [404, "ASSET_NOT_FOUND", "Asset no longer exists", "Refresh library"],
-    [409, "ASSET_STALE", "Asset changed on disk", "Retry detail"],
-    [503, "ASSET_INDEX_UNAVAILABLE", "Asset service is temporarily unavailable", "Retry detail"],
-    [500, "INTERNAL_ERROR", "Local service could not complete the request", "Retry detail"],
+    [404, "ASSET_NOT_FOUND", "知识资产已不存在", "刷新资产列表"],
+    [409, "ASSET_STALE", "知识文件已更新", "重新加载"],
+    [503, "ASSET_INDEX_UNAVAILABLE", "知识服务暂时不可用", "重新加载"],
+    [500, "INTERNAL_ERROR", "本地服务未能完成请求", "重新加载"],
   ])("shows safe, explicit detail error handling for HTTP %i", async (status, code, copy, action) => {
     fetchMock.mockImplementation(async (input) => String(input).startsWith("/api/assets/")
       ? jsonResponse({ ok: false, error: { code, message: "sensitive backend object", retryable: status === 409 || status === 503 } }, status)
@@ -228,8 +233,8 @@ describe("Asset Desk", () => {
     fetchMock.mockRejectedValue(new TypeError("private socket detail"));
     const wrapper = mount(App);
     await flushPromises();
-    expect(wrapper.text()).toContain("Local service is offline");
-    expect(buttonNamed(wrapper, "Retry").exists()).toBe(true);
+    expect(wrapper.text()).toContain("本地服务未连接");
+    expect(buttonNamed(wrapper, "重试").exists()).toBe(true);
     expect(wrapper.text()).not.toContain("private socket detail");
   });
 
@@ -268,7 +273,7 @@ describe("Asset Desk", () => {
         ? jsonResponse({ ok: true, data: { asset: assetDetail } })
         : jsonResponse({ ok: true, data: { items: [assetItem] } }));
     const wrapper = await mountLoadedApp();
-    await buttonNamed(wrapper, "Inbox").trigger("click");
+    await buttonNamed(wrapper, "收件箱").trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("Inbox Candidate");
     for (const code of [
@@ -296,10 +301,46 @@ describe("Asset Desk", () => {
 
   it("treats a missing Inbox as a normal empty state", async () => {
     const wrapper = await mountLoadedApp();
-    await buttonNamed(wrapper, "Inbox").trigger("click");
+    await buttonNamed(wrapper, "收件箱").trigger("click");
     await flushPromises();
-    expect(wrapper.text()).toContain("Inbox is clear");
+    expect(wrapper.text()).toContain("收件箱已清空");
     expect(wrapper.text()).not.toContain("temporarily unavailable");
+  });
+
+  it("returns from Inbox to search with the keyboard shortcut", async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await buttonNamed(wrapper, "收件箱").trigger("click");
+    await flushPromises();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, cancelable: true }));
+    await flushPromises();
+    expect(document.activeElement).toBe(wrapper.get('input[type="search"]').element);
+    expect(buttonNamed(wrapper, "知识资产").attributes("aria-current")).toBe("page");
+    expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it("switches content tabs using arrows and connects the active panel", async () => {
+    const wrapper = await mountLoadedApp();
+    await wrapper.get("#asset-tab-RENDERED").trigger("keydown", { key: "ArrowRight" });
+    expect(wrapper.get("#asset-tab-RAW").attributes("aria-selected")).toBe("true");
+    expect(wrapper.get("#asset-panel").attributes("aria-labelledby")).toBe("asset-tab-RAW");
+    expect(wrapper.get("#asset-panel").text()).toContain("# Raw source");
+    await wrapper.get("#asset-tab-RAW").trigger("keydown", { key: "End" });
+    expect(wrapper.get("#asset-tab-FRONTMATTER").attributes("tabindex")).toBe("0");
+    await wrapper.get("#asset-tab-FRONTMATTER").trigger("keydown", { key: "Home" });
+    expect(wrapper.find(".markdown-body h1").text()).toBe("Rendered source");
+  });
+
+  it("persists the chosen appearance and can return to system appearance", async () => {
+    const wrapper = await mountLoadedApp();
+    await wrapper.get('select[aria-label="外观主题"]').setValue("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem("hub-theme")).toBe("dark");
+    wrapper.unmount();
+    const restored = await mountLoadedApp();
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    await restored.get('select[aria-label="外观主题"]').setValue("system");
+    expect(document.documentElement.dataset.theme).toBe("system");
   });
 
   it("exposes keyboard-native controls and visible selection semantics", async () => {

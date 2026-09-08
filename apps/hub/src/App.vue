@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import OverviewView from "./views/OverviewView.vue";
 import AssetsView from "./views/AssetsView.vue";
 import TaskLoadoutsView from "./views/TaskLoadoutsView.vue";
 import UsageView from "./views/UsageView.vue";
@@ -11,16 +12,17 @@ const route = useRoute();
 const collapsed = ref(false);
 const theme = ref<"system" | "light" | "dark">("dark");
 const navigation: { page: Page; label: string; icon: string }[] = [
+  { page: "overview", label: "总览", icon: "overview" },
   { page: "library", label: "知识资产", icon: "library" },
   { page: "inbox", label: "收件箱", icon: "inbox" },
-  { page: "tasks", label: "任务与装载", icon: "layers" },
+  { page: "tasks", label: "任务", icon: "layers" },
   { page: "usage", label: "使用记录", icon: "activity" },
   { page: "status", label: "系统状态", icon: "settings" },
 ];
 const view = computed(
   () =>
-    ({ tasks: TaskLoadoutsView, usage: UsageView, status: SystemStatusView })[
-      route.value.page as "tasks" | "usage" | "status"
+    ({ overview: OverviewView, tasks: TaskLoadoutsView, usage: UsageView, status: SystemStatusView })[
+      route.value.page as "overview" | "tasks" | "usage" | "status"
     ] ?? AssetsView,
 );
 function documentMainFocus() {

@@ -136,6 +136,13 @@ export class TaskRepository {
     return row === undefined ? null : toTaskRecord(row);
   }
 
+  summarizeByWorkspace(): Array<{ workspace: string | null; status: TaskStatus; count: number }> {
+    return this.#database.prepare<[], { workspace: string | null; status: TaskStatus; count: number }>(`
+      SELECT workspace, status, count(*) AS count
+      FROM task_loadout GROUP BY workspace, status
+    `).all();
+  }
+
   listTasks(input: TaskListInput): TaskRecord[] {
     const conditions: string[] = [];
     const parameters: Array<number | string | null> = [];

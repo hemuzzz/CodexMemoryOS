@@ -209,6 +209,7 @@ async function createFixture() {
   const app = createApp({
     allowedAuthority: `127.0.0.1:${address.port}`, inboxService, loadoutService, usageService, indexStatus,
     assetService: new http.HubAssetApplicationService(search, loadoutService, usageService),
+    overviewService: new http.OverviewApplicationService({ ...options, inboxService, taskRepository, usageRepository }),
     systemStatusService: new http.SystemStatusApplicationService({ ...options, inboxService, indexStatus, mcpEndpointReady: () => true }),
   });
   const rest = getRequestListener(app.fetch);

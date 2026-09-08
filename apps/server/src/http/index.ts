@@ -11,3 +11,5 @@ export {
   type SystemStatusDependencies,
   type SystemStatusDto,
 } from "./service.js";
+
+export { OverviewApplicationService } from "./overview.js";

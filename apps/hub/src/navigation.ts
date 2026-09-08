@@ -1,6 +1,7 @@
 import { onBeforeUnmount, ref } from "vue";
 
 export type Page =
+  | "overview"
   | "library"
   | "search"
   | "inbox"
@@ -8,6 +9,7 @@ export type Page =
   | "usage"
   | "status";
 const pages: Page[] = [
+  "overview",
   "library",
   "search",
   "inbox",
@@ -17,9 +19,8 @@ const pages: Page[] = [
 ];
 
 export function readRoute() {
-  const [page, encodedId, presentation] = location.hash
-    .replace(/^#\/?/, "")
-    .split("/");
+  const [path, query = ""] = location.hash.replace(/^#\/?/, "").split("?");
+  const [page, encodedId, presentation] = (path ?? "").split("/");
   let id: string | undefined;
   try {
     id = encodedId ? decodeURIComponent(encodedId) : undefined;
@@ -27,14 +28,16 @@ export function readRoute() {
     /* Malformed links open the list. */
   }
   return {
-    page: pages.includes(page as Page) ? (page as Page) : ("library" as Page),
+    page: pages.includes(page as Page) ? (page as Page) : ("overview" as Page),
     id,
+    query,
     expanded: presentation === "read",
   };
 }
 
-export function navigate(page: Page, id?: string, expanded = false): void {
-  const hash = `#/${page}${id ? `/${encodeURIComponent(id)}` : ""}${expanded ? "/read" : ""}`;
+export function navigate(page: Page, id?: string, expanded = false, filters?: Record<string, string>): void {
+  const query = new URLSearchParams(filters).toString();
+  const hash = `#/${page}${id ? `/${encodeURIComponent(id)}` : ""}${expanded ? "/read" : ""}${query ? `?${query}` : ""}`;
   if (location.hash === hash) return;
   history.pushState(null, "", hash);
   window.dispatchEvent(new Event("hub:navigate"));

@@ -49,13 +49,13 @@ const filterCount = computed(
     Number(appliedFilters.value.workspace !== undefined),
 );
 function closePreview() {
-  navigate(route.value.page);
+  navigate(route.value.page, undefined, false, Object.fromEntries(new URLSearchParams(route.value.query)));
 }
 function expandPreview() {
-  navigate(route.value.page, route.value.id, !route.value.expanded);
+  navigate(route.value.page, route.value.id, !route.value.expanded, Object.fromEntries(new URLSearchParams(route.value.query)));
 }
 function openAsset(assetId: string) {
-  navigate(route.value.page, assetId);
+  navigate(route.value.page, assetId, false, Object.fromEntries(new URLSearchParams(route.value.query)));
 }
 function openInbox(item: InboxItem) {
   navigate("inbox", item.assetId);
@@ -138,6 +138,19 @@ watch(
       syncInboxSelection();
     } else if (["library", "search"].includes(current.page)) {
       if (current.id) selectAsset(current.id);
+      if (current.page === "library" && !current.id && (current.query !== (previous?.query ?? "") || (current.page !== previous?.page && (current.query || previous?.page === "overview")))) {
+        const query = new URLSearchParams(current.query);
+        const type = query.get("type");
+        filters.type = type === "MEMORY" || type === "DOCUMENT" || type === "SKILL" ? type : "";
+        const workspace = query.get("workspace");
+        workspaceMode.value = workspace === null ? "ALL" : workspace === "null" ? "GLOBAL" : "NAMED";
+        filters.workspace = workspace && workspace !== "null" ? workspace : "";
+        filters.scope = workspace === null ? "" : workspace === "null" ? "GLOBAL" : "WORKSPACE";
+        filters.query = "";
+        applyFilters();
+        return;
+      }
+
 
       if (current.page === "search" && previous?.page !== "search")
         void nextTick(() => searchInput.value?.focus());

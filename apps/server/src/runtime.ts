@@ -23,6 +23,7 @@ import {
 } from "./loadout/index.js";
 import { JsonFileLogger, logPathFromEnvironment } from "./logging.js";
 import {
+  OverviewApplicationService,
   HubAssetApplicationService,
   SystemStatusApplicationService,
 } from "./http/index.js";
@@ -173,6 +174,7 @@ export async function startCodexMemoryOsServer(
         loadoutService,
         onInternalError: logInternalError,
         systemStatusService,
+        overviewService: new OverviewApplicationService({ ...systemStatusService.dependencies, taskRepository, usageRepository }),
         usageService,
       },
       { root: HUB_DIST_PATH },

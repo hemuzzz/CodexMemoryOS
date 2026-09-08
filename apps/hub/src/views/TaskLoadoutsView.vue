@@ -31,10 +31,10 @@ import PreviewDialog from "../components/PreviewDialog.vue";
 import UiIcon from "../components/UiIcon.vue";
 const route = useRoute();
 function closePreview() {
-  navigate("tasks");
+  navigate("tasks", undefined, false, Object.fromEntries(new URLSearchParams(route.value.query)));
 }
 function openTask(id: string) {
-  navigate("tasks", id);
+  navigate("tasks", id, false, Object.fromEntries(new URLSearchParams(route.value.query)));
 }
 function chooseWorkspace(mode: WorkspaceMode) {
   setWorkspaceMode(mode);
@@ -107,7 +107,19 @@ watch(
   },
   { immediate: true },
 );
-onMounted(() => void loadTasks({ limit: 20 }));
+watch(() => route.value, (current, previous) => {
+  if (current.page !== "tasks" || current.id) return;
+  if (!previous || current.query !== previous.query || (current.page !== previous.page && (current.query || previous.page === "overview"))) {
+    const query = new URLSearchParams(current.query);
+    const status = query.get("status");
+    filters.status = status === "RUNNING" || status === "COMPLETED" || status === "CANCELLED" ? status : "";
+    const workspace = query.get("workspace");
+    workspaceMode.value = workspace === null ? "ALL" : workspace === "null" ? "NULL" : "NAMED";
+    filters.workspace = workspace && workspace !== "null" ? workspace : "";
+    applyFilters();
+  }
+}, { immediate: true });
+onMounted(() => { if (route.value.id) void loadTasks({ limit: 20 }); });
 onBeforeUnmount(() => {
   listController?.abort();
   detailController?.abort();
@@ -250,11 +262,26 @@ function retryDetail(): void {
 function sequenceNumber(index: number): string {
   return String(index + 1).padStart(2, "0");
 }
+
+function taskTitle(request: string): string {
+  // Attachment wrappers include a separate user-request heading. Prefer that
+  // section for the preview while keeping the stored request intact.
+  const requestHeading = /(?:^|\r\n|\n|\r)#{1,6}\s+My request:[ \t]*(?:\r\n|\n|\r)/u.exec(request);
+  const source = requestHeading
+    ? request.slice(requestHeading.index + requestHeading[0].length)
+    : request;
+  const firstLine = source.split(/\r\n|\n|\r/u).find((line) => line.trim());
+  const title = (firstLine ?? "").replace(/^\s{0,3}#{1,6}\s+/u, "").trim();
+  const characters = Array.from(title || "未命名任务");
+  return characters.length > 72
+    ? `${characters.slice(0, 72).join("")}…`
+    : characters.join("");
+}
 </script>
 
 <template>
   <main class="list-page">
-    <PageHeader title="任务与装载" subtitle="任务与已保存的知识装载">
+    <PageHeader title="任务" subtitle="选择任务，查看知识装载与使用情况">
       <FilterMenu
         label="筛选"
         :count="
@@ -323,7 +350,7 @@ function sequenceNumber(index: number): string {
         <UiIcon name="refresh" />刷新
       </button>
     </PageHeader>
-    <section class="list-scroll" aria-label="任务装载列表">
+    <section class="list-scroll" aria-label="任务列表">
       <div
         v-if="listLoading"
         class="state-panel compact"
@@ -331,7 +358,7 @@ function sequenceNumber(index: number): string {
         aria-live="polite"
       >
         <span class="loading-line" aria-hidden="true"></span>
-        <p>正在读取任务装载…</p>
+        <p>正在读取任务…</p>
       </div>
       <div
         v-else-if="listError && listErrorCopy"
@@ -345,10 +372,10 @@ function sequenceNumber(index: number): string {
         </button>
       </div>
       <div v-else-if="tasks.length === 0" class="state-panel compact">
-        <strong>暂无任务装载</strong>
+        <strong>暂无任务</strong>
         <p>调整筛选条件或刷新列表。</p>
       </div>
-      <ol v-else class="asset-list task-list" aria-label="任务装载结果">
+      <ol v-else class="asset-list task-list" aria-label="任务结果">
         <li v-for="task in tasks" :key="task.taskId">
           <button
             type="button"
@@ -357,18 +384,12 @@ function sequenceNumber(index: number): string {
             @click="openTask(task.taskId)"
           >
             <UiIcon name="layers" /><span class="row-title">{{
-              task.request
+              taskTitle(task.request)
             }}</span
             ><span class="row-scope">{{
               displayWorkspace(task.workspace)
             }}</span
-            ><span class="tag" :class="`status-${task.status.toLowerCase()}`">{{
-              displayValue(task.status)
-            }}</span
-            ><span class="row-measure"
-              >{{ task.assetCount }} 条资产 ·
-              {{ task.estimatedCharacters }} 字符</span
-            ><time class="row-date" :datetime="task.updatedAt">{{
+            ><time class="row-date" :datetime="task.updatedAt" :title="`更新时间：${formatDate(task.updatedAt)}`">{{
               formatDate(task.updatedAt)
             }}</time>
           </button>
@@ -377,7 +398,7 @@ function sequenceNumber(index: number): string {
     </section>
     <PreviewDialog
       v-if="route.page === 'tasks' && route.id"
-      label="任务与装载详情"
+      label="任务详情"
       :expanded="route.expanded"
       @close="closePreview"
       @expand="navigate('tasks', route.id, !route.expanded)"
@@ -414,8 +435,12 @@ function sequenceNumber(index: number): string {
             >
             <span>{{ displayWorkspace(detail.workspace) }}</span>
           </div>
-          <h2 class="mono task-detail-id">{{ detail.taskId }}</h2>
-          <p>{{ detail.request }}</p>
+          <h2>{{ taskTitle(detail.request) }}</h2>
+          <p class="mono task-detail-id">{{ detail.taskId }}</p>
+          <details class="task-request">
+            <summary>原始请求</summary>
+            <pre>{{ detail.request }}</pre>
+          </details>
         </header>
         <dl class="metadata-sheet">
           <div>
@@ -443,15 +468,8 @@ function sequenceNumber(index: number): string {
             </dd>
           </div>
           <div>
-            <dt>数据格式版本</dt>
-            <dd>{{ detail.loadout.schemaVersion }}</dd>
-          </div>
-          <div>
-            <dt>装载资产数量</dt>
-            <dd>
-              {{ detail.loadout.assets.length }} /
-              {{ detail.loadout.limits.maxAssets }}
-            </dd>
+            <dt>状态说明</dt>
+            <dd>任务状态由显式操作更新；“进行中”表示尚未显式结束，不代表 Codex 此刻正在执行。</dd>
           </div>
         </dl>
 
@@ -461,14 +479,13 @@ function sequenceNumber(index: number): string {
         >
           <div class="section-heading content-heading-row">
             <div>
-              <p class="eyebrow">已保存快照</p>
-              <h3 id="task-loadout-content-heading">知识装载</h3>
+              <h3 id="task-loadout-content-heading">{{ detailTab === 'USAGE' ? '知识使用' : '知识装载' }}</h3>
             </div>
             <div
               class="content-tabs"
               role="tablist"
               @keydown="handleTabKeydown"
-              aria-label="任务装载 detail format"
+              aria-label="任务知识详情"
             >
               <button
                 type="button"
@@ -479,7 +496,18 @@ function sequenceNumber(index: number): string {
                 :aria-selected="detailTab === 'STRUCTURED'"
                 @click="detailTab = 'STRUCTURED'"
               >
-                装载列表
+                知识装载
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="task-tab-USAGE"
+                aria-controls="task-panel"
+                :tabindex="detailTab === 'USAGE' ? 0 : -1"
+                :aria-selected="detailTab === 'USAGE'"
+                @click="detailTab = 'USAGE'"
+              >
+                知识使用
               </button>
               <button
                 type="button"
@@ -492,17 +520,6 @@ function sequenceNumber(index: number): string {
               >
                 原始 JSON
               </button>
-              <button
-                type="button"
-                role="tab"
-                id="task-tab-USAGE"
-                aria-controls="task-panel"
-                :tabindex="detailTab === 'USAGE' ? 0 : -1"
-                :aria-selected="detailTab === 'USAGE'"
-                @click="detailTab = 'USAGE'"
-              >
-                关联使用
-              </button>
             </div>
           </div>
 
@@ -514,22 +531,29 @@ function sequenceNumber(index: number): string {
             :aria-labelledby="`task-tab-${detailTab}`"
             tabindex="0"
           >
-            <dl class="loadout-limits">
-              <div>
-                <dt>注入字符上限</dt>
-                <dd>{{ detail.loadout.limits.maxInjectedCharacters }}</dd>
-              </div>
-              <div>
-                <dt>资产数量上限</dt>
-                <dd>{{ detail.loadout.limits.maxAssets }}</dd>
-              </div>
-            </dl>
+            <details class="task-loadout-options">
+              <summary>装载信息与限制 · {{ detail.loadout.assets.length }} 条知识</summary>
+              <dl class="loadout-limits">
+                <div>
+                  <dt>注入字符上限</dt>
+                  <dd>{{ detail.loadout.limits.maxInjectedCharacters }}</dd>
+                </div>
+                <div>
+                  <dt>资产数量上限</dt>
+                  <dd>{{ detail.loadout.limits.maxAssets }}</dd>
+                </div>
+                <div>
+                  <dt>数据格式版本</dt>
+                  <dd>{{ detail.loadout.schemaVersion }}</dd>
+                </div>
+              </dl>
+            </details>
             <div
               v-if="detail.loadout.assets.length === 0"
               class="state-panel compact"
             >
-              <strong>本次装载为空</strong>
-              <p>已保存的装载中没有资产。</p>
+              <strong>暂无已保存的知识装载</strong>
+              <p>可在“知识使用”中查看搜索、读取和实际使用记录。</p>
             </div>
             <ol
               v-else
@@ -583,7 +607,7 @@ function sequenceNumber(index: number): string {
             tabindex="0"
           >
             <div v-if="detail.usages.length === 0" class="state-panel compact">
-              <strong>暂无关联使用</strong>
+              <strong>暂无知识使用记录</strong>
               <p>该任务暂无使用记录。</p>
             </div>
             <div v-else class="table-scroll">

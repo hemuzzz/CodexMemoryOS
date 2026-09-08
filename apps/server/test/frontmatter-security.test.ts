@@ -1,3 +1,4 @@
+import { OverviewApplicationService } from "../src/http/overview.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -226,6 +227,7 @@ async function createFixture() {
     assetService: new HubAssetApplicationService(search, loadoutService, usageService),
     inboxService, loadoutService, usageService,
     indexStatus: () => index.status(),
+    overviewService: new OverviewApplicationService({ ...options, inboxService, taskRepository, usageRepository }),
     systemStatusService: new SystemStatusApplicationService({
       ...options, inboxService, indexStatus: () => index.status(), mcpEndpointReady: () => false,
     }),

@@ -15,6 +15,7 @@ import {
   type AssetType,
 } from "../src/asset/index.js";
 import {
+  OverviewApplicationService,
   HubAssetApplicationService,
   SystemStatusApplicationService,
 } from "../src/http/index.js";
@@ -412,7 +413,7 @@ test("N09 System Status remains HTTP 200 for READY, DEGRADED, and REBUILD_REQUIR
   }
 });
 
-test("N09 exposes exactly seven read-only GET APIs with uniform envelopes and local Host/Origin protection", async () => {
+test("N09 exposes read-only GET APIs with uniform envelopes and local Host/Origin protection", async () => {
   const fixture = await createFixture();
   try {
     const taskId = fixture.createTask("alpha", "side effect check", fixture.alphaAssetId);
@@ -428,6 +429,7 @@ test("N09 exposes exactly seven read-only GET APIs with uniform envelopes and lo
       `/api/task-loadouts/${taskId}`,
       "/api/usages",
       "/api/system/status",
+      "/api/overview",
     ]) {
       const response = await getJson(fixture, path);
       assert.equal(response.status, 200, path);
@@ -566,6 +568,7 @@ async function createFixture(): Promise<RestFixture> {
     indexStatus: statusProvider,
     loadoutService,
     systemStatusService,
+    overviewService: new OverviewApplicationService({ repositoryPath, workspaceConfigPath, inboxService, taskRepository, usageRepository }),
     usageService,
   });
 
@@ -695,3 +698,34 @@ function errorCode(body: Record<string, unknown>): unknown {
   assert.equal(body.ok, false);
   return (body.error as Record<string, unknown>).code;
 }
+
+
+test("Overview aggregates beyond list limits, counts Used tasks distinctly and scans current files without Usage writes", async () => {
+  const fixture = await createFixture();
+  try {
+    for (let i = 0; i < 105; i++) fixture.createTask("alpha", `overview ${i}`);
+    const used = fixture.createTask("beta", "used");
+    fixture.usageService.recordRecalls(used, [fixture.betaAssetId, fixture.globalAssetId]);
+    fixture.usageService.recordRead(used, fixture.betaAssetId);
+    fixture.usageService.markUsed(used, fixture.betaAssetId);
+    fixture.usageService.markUsed(used, fixture.globalAssetId);
+    fixture.usageService.markUsed(used, fixture.globalAssetId);
+    const before = fixture.usageService.list({});
+    const response = await getJson(fixture, "/api/overview");
+    assert.equal(response.status, 200);
+    const result = response.body.data as import("../src/http/overview.js").OverviewDto;
+    assert.equal(result.scopes.find(s => s.workspace === "alpha")?.tasks.RUNNING, 105);
+    assert.deepEqual(result.scopes.find(s => s.workspace === "beta")?.usage,
+      { recallCount: 2, readCount: 1, usedPairCount: 2, usedTaskCount: 1 });
+    assert.equal(result.scopes.reduce((sum, s) => sum + Object.values(s.assets).reduce((a, b) => a + b, 0), 0), 3);
+    await unlink(fixture.alphaAssetPath);
+    const fresh = (await getJson(fixture, "/api/overview")).body.data as import("../src/http/overview.js").OverviewDto;
+    assert.deepEqual(fresh.scopes.find(s => s.workspace === "alpha")?.assets, { MEMORY: 0, DOCUMENT: 0, SKILL: 0 });
+    assert.deepEqual(fixture.usageService.list({}), before);
+    assert.equal((await getJson(fixture, "/api/overview?limit=20")).status, 400);
+    assert.equal((await requestJson(fixture, "/api/overview", { method: "POST" })).status, 405);
+    assert.equal((await requestJson(fixture, "/api/overview", { headers: { origin: "https://example.com" } })).status, 403);
+    await writeFile(fixture.workspaceConfigPath, "invalid JSON");
+    assert.equal((await getJson(fixture, "/api/overview")).status, 503);
+  } finally { await fixture.close(); }
+});

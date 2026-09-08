@@ -31,6 +31,7 @@ import {
   type RestErrorResponse,
   type RestSuccessResponse,
 } from "./contracts/index.js";
+import type { OverviewApplicationService } from "./overview.js";
 import { RestError, invalidRequest } from "./errors.js";
 import {
   HubAssetApplicationService,
@@ -38,6 +39,7 @@ import {
 } from "./service.js";
 
 const KNOWN_API_PATHS = [
+  /^\/api\/overview$/u,
   /^\/api\/assets$/u,
   /^\/api\/assets\/[^/]+\/diff$/u,
   /^\/api\/assets\/[^/]+$/u,
@@ -50,6 +52,7 @@ const KNOWN_API_PATHS = [
 
 export interface RestApiDependencies {
   allowedAuthority: string;
+  overviewService: Pick<OverviewApplicationService, "get">;
   assetService: HubAssetApplicationService;
   inboxService: Pick<InboxApplicationService, "scan">;
   indexStatus: () => AssetIndexStatus;
@@ -79,6 +82,11 @@ export function createRestApiApp(dependencies: RestApiDependencies): Hono {
       });
     }
     await next();
+  });
+
+  app.get("/api/overview", async (context) => {
+    parseStrictQuery(context, [], z.object({}).strict());
+    return success(context, await dependencies.overviewService.get());
   });
 
   app.get("/api/assets", async (context) => {

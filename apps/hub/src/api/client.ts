@@ -1,4 +1,5 @@
 import type {
+  OverviewDto,
   AssetDetail,
   AssetLibraryItem,
   AssetListFilters,
@@ -59,6 +60,10 @@ export class HubApiClient {
 
   listUsages(filters: UsageListFilters, signal?: AbortSignal): Promise<{ items: UsageListItem[] }> {
     return this.#get(buildUsageListPath(filters), signal);
+  }
+
+  getOverview(signal?: AbortSignal): Promise<OverviewDto> {
+    return this.#get("/api/overview", signal);
   }
 
   getSystemStatus(signal?: AbortSignal): Promise<SystemStatus> {

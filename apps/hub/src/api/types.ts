@@ -222,3 +222,17 @@ export interface SystemStatus {
     version: string;
   };
 }
+
+export interface OverviewScope {
+  workspace: string | null;
+  assets: { MEMORY: number; DOCUMENT: number; SKILL: number };
+  inboxCount: number;
+  tasks: { RUNNING: number; COMPLETED: number; CANCELLED: number };
+  usage: { recallCount: number; readCount: number; usedPairCount: number; usedTaskCount: number };
+}
+
+export interface OverviewDto {
+  scopes: OverviewScope[];
+  generatedAt: string;
+  diagnosticCount: number;
+}

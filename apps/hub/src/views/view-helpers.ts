@@ -48,7 +48,7 @@ export function presentReadError(
         ? "系统状态"
         : context === "USAGE_LIST"
           ? "使用记录"
-          : "任务装载";
+          : "任务";
     return {
       title: `${subject}暂时不可用`,
       detail: "本地服务尚未就绪，请恢复后重试。",

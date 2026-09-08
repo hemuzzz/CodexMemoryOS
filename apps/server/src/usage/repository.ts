@@ -221,6 +221,24 @@ export class UsageRepository {
     return rows.map(toUsageListItem);
   }
 
+  summarizeByWorkspace(): Array<{
+    workspace: string | null; recallCount: number; readCount: number;
+    usedPairCount: number; usedTaskCount: number;
+  }> {
+    return this.#database.prepare<[], {
+      workspace: string | null; recallCount: number; readCount: number;
+      usedPairCount: number; usedTaskCount: number;
+    }>(`
+      SELECT task.workspace,
+        coalesce(sum(usage.recall_count), 0) AS recallCount,
+        coalesce(sum(usage.read_count), 0) AS readCount,
+        coalesce(sum(CASE WHEN usage.used_flag = 1 THEN 1 ELSE 0 END), 0) AS usedPairCount,
+        count(DISTINCT CASE WHEN usage.used_flag = 1 THEN usage.task_id END) AS usedTaskCount
+      FROM task_asset_usage AS usage JOIN task_loadout AS task ON task.task_id = usage.task_id
+      GROUP BY task.workspace
+    `).all();
+  }
+
   summarizeByAsset(assetId: string): AssetUsageSummary {
     const row = this.#database
       .prepare<[string], AssetUsageSummary>(`

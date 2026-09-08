@@ -70,7 +70,7 @@ enableAutoUnmount(afterEach);
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 
 beforeEach(() => {
-  history.replaceState(null, "", "/");
+  history.replaceState(null, "", "/#/library");
   localStorage.clear();
   delete document.documentElement.dataset.theme;
   fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
@@ -193,7 +193,7 @@ describe("Asset Desk", () => {
     expect(fetchMock.mock.calls.at(-1)?.[0]).toBe("/api/assets?limit=20");
   });
 
-  it("switches among the five read-only Hub views through the shared navigation", async () => {
+  it("switches among the six read-only Hub views through the shared navigation", async () => {
     fetchMock.mockImplementation(async (input) => {
       const path = String(input);
       if (path === "/api/task-loadouts?limit=20") {
@@ -238,15 +238,15 @@ describe("Asset Desk", () => {
     const wrapper = await mountLoadedApp();
     const navigation = wrapper.get(".primary-navigation");
     expect(navigation.findAll("button").map((button) => button.text())).toEqual(
-      ["知识资产", "收件箱", "任务与装载", "使用记录", "系统状态"],
+      ["总览", "知识资产", "收件箱", "任务", "使用记录", "系统状态"],
     );
     expect(buttonNamed(wrapper, "知识资产").attributes("aria-current")).toBe(
       "page",
     );
 
-    await buttonNamed(wrapper, "任务与装载").trigger("click");
+    await buttonNamed(wrapper, "任务").trigger("click");
     await flushPromises();
-    expect(wrapper.text()).toContain("暂无任务装载");
+    expect(wrapper.text()).toContain("暂无任务");
     await buttonNamed(wrapper, "使用记录").trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("暂无使用记录");

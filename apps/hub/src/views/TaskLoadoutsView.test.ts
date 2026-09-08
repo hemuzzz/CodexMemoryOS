@@ -84,6 +84,13 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Task Loadouts view", () => {
   it("loads the initial list and detail without changing stored Asset order", async () => {
     const wrapper = await mountLoadedView();
+    const row = wrapper.get(".task-row");
+    expect(row.text()).toContain(summary.request);
+    expect(row.text()).toContain(summary.workspace);
+    expect(row.text()).not.toContain("进行中");
+    expect(row.text()).not.toContain("条资产");
+    expect(row.text()).not.toContain("字符");
+    expect(wrapper.find("dialog").exists()).toBe(false);
     await wrapper.get(".task-row").trigger("click");
     await flushPromises();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
@@ -92,8 +99,9 @@ describe("Task Loadouts view", () => {
     ]);
     expect(wrapper.get("dialog").attributes("open")).toBeDefined();
     expect(wrapper.text()).toContain(summary.request);
-    expect(wrapper.text()).toContain("2 条资产");
-    expect(wrapper.text()).toContain("461 字符");
+    expect(wrapper.get("dialog").text()).toContain("进行中");
+    expect(wrapper.get("dialog").text()).toContain("不代表 Codex 此刻正在执行");
+    expect(wrapper.text()).toContain("2 条知识");
     expect(
       wrapper.findAll(".sequence-heading code").map((item) => item.text()),
     ).toEqual([firstAssetId, secondAssetId]);
@@ -106,10 +114,35 @@ describe("Task Loadouts view", () => {
     expect(raw.indexOf(firstAssetId)).toBeLessThan(raw.indexOf(secondAssetId));
     expect(raw).toContain('"maxInjectedCharacters": 3000');
 
-    await buttonNamed(wrapper, "关联使用").trigger("click");
+    await buttonNamed(wrapper, "知识使用").trigger("click");
     expect(wrapper.text()).toContain("usg2034512345678901252");
     expect(wrapper.text()).toContain("资产已缺失");
     expect(wrapper.text()).toContain("已使用");
+  });
+
+  it("keeps empty-loadout tasks visible and their usage accessible with the full original request", async () => {
+    const title = "核对知识使用情况".repeat(12);
+    const request = `# Files mentioned by the user:\n\n附件.md: /tmp/附件.md\n\n## My request:\n\n## ${title}\r\n完整原始请求：保留换行、提示词和后续条件。`;
+    fetchMock.mockImplementation(async (input) =>
+      String(input).startsWith("/api/task-loadouts/")
+        ? jsonResponse({ ok: true, data: { taskLoadout: {
+            ...detail, request, loadout: { ...detail.loadout, assets: [] },
+          } } })
+        : jsonResponse({ ok: true, data: { items: [{
+            ...summary, request, assetCount: 0, estimatedCharacters: 0,
+          }] } }),
+    );
+    const wrapper = await mountLoadedView();
+    expect(wrapper.findAll(".task-row")).toHaveLength(1);
+    expect(wrapper.get(".row-title").text()).toBe(`${Array.from(title).slice(0, 72).join("")}…`);
+    expect(wrapper.text()).not.toContain("完整原始请求");
+    await wrapper.get(".task-row").trigger("click");
+    await flushPromises();
+    expect(wrapper.get(".task-request pre").element.textContent).toBe(request);
+    expect(wrapper.text()).toContain("暂无已保存的知识装载");
+    await buttonNamed(wrapper, "知识使用").trigger("click");
+    expect(wrapper.get('[role="tabpanel"]').text()).toContain("usg2034512345678901252");
+    expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
   });
 
   it("applies Workspace, status, and legal limit filters with distinct NULL semantics", async () => {
@@ -225,7 +258,7 @@ describe("Task Loadouts view", () => {
       );
       const wrapper = await mountLoadedView();
       expect(wrapper.text()).toContain(
-        status === 503 ? "任务装载暂时不可用" : "本地服务未能完成请求",
+        status === 503 ? "任务暂时不可用" : "本地服务未能完成请求",
       );
       expect(wrapper.text()).not.toContain("private detail");
       expect(buttonNamed(wrapper, "重试").exists()).toBe(true);

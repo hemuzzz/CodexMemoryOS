@@ -148,198 +148,166 @@ async function loadUsages(requestFilters: UsageListFilters): Promise<void> {
     }
   }
 }
+import PageHeader from "../components/PageHeader.vue";
+import FilterMenu from "../components/FilterMenu.vue";
+import FilterOptions from "../components/FilterOptions.vue";
+import UiIcon from "../components/UiIcon.vue";
+function chooseWorkspace(mode: WorkspaceMode) {
+  setWorkspaceMode(mode);
+  if (mode !== "NAMED") applyFilters();
+}
+function chooseLimit(value: number) {
+  filters.limit = value as 20 | 50 | 100;
+  applyFilters();
+}
 </script>
 
 <template>
-  <main class="report-workbench" aria-labelledby="usage-view-heading">
-    <header class="report-header">
-      <div>
-        <p class="eyebrow">知识使用情况</p>
-        <h2 id="usage-view-heading">使用记录</h2>
-      </div>
-      <button type="button" class="secondary-button" @click="refreshUsages">
-        刷新记录
-      </button>
-    </header>
-    <p class="supporting-copy report-intro">
-      分别展示知识的召回次数、读取次数与实际使用情况。
-    </p>
-
-    <form
-      class="filter-panel report-filters"
-      aria-label="筛选使用记录"
-      @submit.prevent="applyFilters"
-    >
-      <div class="filter-row usage-id-filters">
-        <label
-          ><span>任务 ID</span
-          ><input
-            v-model="filters.taskId"
-            autocomplete="off"
-            placeholder="输入完整 tsk… ID"
-        /></label>
-        <label
-          ><span>资产 ID</span
-          ><input
-            v-model="filters.assetId"
-            autocomplete="off"
-            placeholder="输入完整 ast… ID"
-        /></label>
-        <label
-          ><span>显示条数</span
-          ><select v-model="filters.limit">
-            <option :value="20">20</option>
-            <option :value="50">50</option>
-            <option :value="100">100</option>
-          </select></label
+  <main class="list-page">
+    <PageHeader title="使用记录" subtitle="召回、读取与实际使用">
+      <FilterMenu
+        label="筛选"
+        :count="
+          Number(!!appliedFilters.taskId) +
+          Number(!!appliedFilters.assetId) +
+          Number(appliedFilters.workspace !== undefined)
+        "
+      >
+        <form
+          class="menu-input usage-id-filters"
+          aria-label="筛选使用记录"
+          @submit.prevent="applyFilters"
         >
-      </div>
-      <fieldset class="workspace-filter usage-workspace-filter">
-        <legend>任务工作区</legend>
-        <div class="segmented-control">
-          <button
-            type="button"
-            :aria-pressed="workspaceMode === 'ALL'"
-            @click="setWorkspaceMode('ALL')"
-          >
-            全部
-          </button>
-          <button
-            type="button"
-            :aria-pressed="workspaceMode === 'NULL'"
-            @click="setWorkspaceMode('NULL')"
-          >
-            未绑定
-          </button>
-          <button
-            type="button"
-            :aria-pressed="workspaceMode === 'NAMED'"
-            @click="setWorkspaceMode('NAMED')"
-          >
-            指定工作区
-          </button>
-        </div>
-        <label v-if="workspaceMode === 'NAMED'" class="exact-workspace">
-          <span>工作区名称</span>
-          <input
-            v-model="filters.workspace"
-            list="usage-workspace-suggestions"
-            autocomplete="off"
-          />
-          <datalist id="usage-workspace-suggestions">
+          <label
+            >任务 ID<input
+              v-model="filters.taskId"
+              autocomplete="off"
+              placeholder="输入完整 tsk… ID" /></label
+          ><label
+            >资产 ID<input
+              v-model="filters.assetId"
+              autocomplete="off"
+              placeholder="输入完整 ast… ID" /></label
+          ><button type="submit" class="quiet-button">应用 ID</button>
+        </form>
+        <FilterOptions
+          label="任务工作区"
+          :model-value="workspaceMode"
+          :options="[
+            { value: 'ALL', label: '全部' },
+            { value: 'NULL', label: '未绑定' },
+            { value: 'NAMED', label: '指定工作区' },
+          ]"
+          @update:model-value="chooseWorkspace"
+        />
+        <form
+          v-if="workspaceMode === 'NAMED'"
+          class="menu-input exact-workspace"
+          @submit.prevent="applyFilters"
+        >
+          <label
+            >工作区名称<input
+              v-model="filters.workspace"
+              list="usage-workspace-suggestions"
+              autocomplete="off" /></label
+          ><datalist id="usage-workspace-suggestions">
             <option
               v-for="workspace in workspaceSuggestions"
               :key="workspace"
               :value="workspace"
-            />
-          </datalist>
-          <small>建议名称来自当前结果。</small>
-        </label>
-      </fieldset>
-      <p v-if="filterError" class="field-error" role="alert">
-        {{ filterError }}
-      </p>
-      <div class="filter-actions">
-        <button type="submit" class="primary-button">应用筛选</button
-        ><button type="button" class="quiet-button" @click="resetFilters">
-          重置
+            /></datalist
+          ><button type="submit" class="quiet-button">应用工作区</button>
+        </form>
+        <p v-if="filterError" class="field-error" role="alert">
+          {{ filterError }}
+        </p>
+        <button type="button" class="menu-reset" @click="resetFilters">
+          清除筛选
+        </button>
+      </FilterMenu>
+      <FilterMenu label="显示" icon="settings"
+        ><FilterOptions
+          label="显示条数"
+          :model-value="filters.limit"
+          :options="[
+            { value: 20, label: '20 条' },
+            { value: 50, label: '50 条' },
+            { value: 100, label: '100 条' },
+          ]"
+          @update:model-value="chooseLimit"
+      /></FilterMenu>
+      <button type="button" class="quiet-button" @click="refreshUsages">
+        <UiIcon name="refresh" />刷新记录
+      </button>
+    </PageHeader>
+    <section class="list-scroll" aria-label="使用记录">
+      <p class="result-count">{{ appliedSummary }}</p>
+      <div
+        v-if="loading"
+        class="state-panel compact"
+        role="status"
+        aria-live="polite"
+      >
+        <span class="loading-line" aria-hidden="true"></span>
+        <p>正在读取使用记录…</p>
+      </div>
+      <div
+        v-else-if="error && errorCopy"
+        class="state-panel compact error-state"
+        role="alert"
+      >
+        <strong>{{ errorCopy.title }}</strong>
+        <p>{{ errorCopy.detail }}</p>
+        <button type="button" class="secondary-button" @click="refreshUsages">
+          重试
         </button>
       </div>
-    </form>
-
-    <div class="ledger-heading">
-      <div>
-        <p class="eyebrow">当前筛选</p>
-        <h3>{{ appliedSummary }}</h3>
+      <div v-else-if="usages.length === 0" class="state-panel compact">
+        <strong>暂无使用记录</strong>
+        <p>调整任务、资产或工作区筛选后重试。</p>
       </div>
-      <span v-if="!loading && !error" aria-live="polite"
-        >{{ usages.length }} 条 · 当前返回结果</span
-      >
-    </div>
-    <div
-      v-if="loading"
-      class="state-panel compact"
-      role="status"
-      aria-live="polite"
-    >
-      <span class="loading-line" aria-hidden="true"></span>
-      <p>正在读取使用记录…</p>
-    </div>
-    <div
-      v-else-if="error && errorCopy"
-      class="state-panel compact error-state"
-      role="alert"
-    >
-      <strong>{{ errorCopy.title }}</strong>
-      <p>{{ errorCopy.detail }}</p>
-      <button type="button" class="secondary-button" @click="refreshUsages">
-        重试
-      </button>
-    </div>
-    <div v-else-if="usages.length === 0" class="state-panel compact">
-      <strong>暂无使用记录</strong>
-      <p>调整任务、资产或工作区筛选后重试。</p>
-    </div>
-    <ol v-else class="usage-ledger" aria-label="使用记录结果">
-      <li
-        v-for="usage in usages"
-        :key="usage.usageId"
-        :class="{ missing: usage.assetMissing }"
-      >
-        <div class="usage-record-heading">
-          <div>
-            <span class="tag">使用记录</span><code>{{ usage.usageId }}</code>
-          </div>
-          <span v-if="usage.assetMissing" class="missing-label">资产已缺失</span
-          ><span v-else class="available-label">资产可用</span>
-        </div>
-        <dl class="usage-facts">
-          <div class="wide-fact">
-            <dt>任务 ID</dt>
-            <dd>
-              <code>{{ usage.taskId }}</code>
-            </dd>
-          </div>
-          <div class="wide-fact">
-            <dt>资产 ID</dt>
-            <dd>
-              <code>{{ usage.assetId }}</code>
-            </dd>
-          </div>
-          <div>
-            <dt>工作区</dt>
-            <dd>{{ displayWorkspace(usage.workspace) }}</dd>
-          </div>
-          <div>
-            <dt>召回</dt>
-            <dd>{{ usage.recallCount }}</dd>
-          </div>
-          <div>
-            <dt>读取</dt>
-            <dd>{{ usage.readCount }}</dd>
-          </div>
-          <div>
-            <dt>实际使用</dt>
-            <dd>{{ usage.usedFlag ? "已使用" : "未使用" }}</dd>
-          </div>
-          <div>
-            <dt>创建时间</dt>
-            <dd>
-              <time :datetime="usage.createdAt">{{
-                formatDate(usage.createdAt)
-              }}</time>
-            </dd>
-          </div>
-          <div>
-            <dt>更新时间</dt>
-            <dd>
-              <time :datetime="usage.updatedAt">{{
-                formatDate(usage.updatedAt)
-              }}</time>
-            </dd>
-          </div>
-        </dl>
-      </li>
-    </ol>
+      <div v-else class="table-scroll">
+        <table class="usage-table" aria-label="使用记录结果">
+          <thead>
+            <tr>
+              <th>任务 ID</th>
+              <th>资产 ID</th>
+              <th>工作区</th>
+              <th>召回</th>
+              <th>读取</th>
+              <th>实际使用</th>
+              <th>更新时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="usage in usages" :key="usage.usageId">
+              <td>
+                <code :title="usage.taskId">{{ usage.taskId }}</code>
+              </td>
+              <td>
+                <code :title="usage.assetId">{{ usage.assetId }}</code
+                ><small :class="{ 'missing-label': usage.assetMissing }">{{
+                  usage.assetMissing ? "资产已缺失" : "资产可用"
+                }}</small>
+              </td>
+              <td>{{ displayWorkspace(usage.workspace) }}</td>
+              <td>{{ usage.recallCount }}</td>
+              <td>{{ usage.readCount }}</td>
+              <td>{{ usage.usedFlag ? "已使用" : "未使用" }}</td>
+              <td>
+                <time :datetime="usage.updatedAt">{{
+                  formatDate(usage.updatedAt)
+                }}</time>
+                <details class="record-info">
+                  <summary>记录信息</summary>
+                  <code>{{ usage.usageId }}</code
+                  ><span>创建时间 {{ formatDate(usage.createdAt) }}</span>
+                </details>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </main>
 </template>

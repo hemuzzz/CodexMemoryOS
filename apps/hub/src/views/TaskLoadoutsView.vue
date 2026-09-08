@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { displayValue, handleTabKeydown } from "./view-helpers.js";
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 
 import { HubApiClient, HubApiError, isAbortError } from "../api/client.js";
 import type {
@@ -16,6 +23,31 @@ import {
   presentReadError,
 } from "./view-helpers.js";
 
+import { navigate, useRoute } from "../navigation.js";
+import PageHeader from "../components/PageHeader.vue";
+import FilterMenu from "../components/FilterMenu.vue";
+import FilterOptions from "../components/FilterOptions.vue";
+import PreviewDialog from "../components/PreviewDialog.vue";
+import UiIcon from "../components/UiIcon.vue";
+const route = useRoute();
+function closePreview() {
+  navigate("tasks");
+}
+function openTask(id: string) {
+  navigate("tasks", id);
+}
+function chooseWorkspace(mode: WorkspaceMode) {
+  setWorkspaceMode(mode);
+  if (mode !== "NAMED") applyFilters();
+}
+function chooseStatus(value: "" | TaskStatus) {
+  filters.status = value;
+  applyFilters();
+}
+function chooseLimit(value: number) {
+  filters.limit = value as 20 | 50 | 100;
+  applyFilters();
+}
 type DetailTab = "STRUCTURED" | "RAW" | "USAGE";
 type WorkspaceMode = "ALL" | "NULL" | "NAMED";
 
@@ -64,6 +96,17 @@ const rawLoadout = computed(() =>
     : JSON.stringify(detail.value.loadout, null, 2),
 );
 
+watch(
+  () => route.value,
+  (current) => {
+    if (current.page === "tasks" && current.id) selectTask(current.id);
+    else {
+      selectedTaskId.value = undefined;
+      clearDetail();
+    }
+  },
+  { immediate: true },
+);
 onMounted(() => void loadTasks({ limit: 20 }));
 onBeforeUnmount(() => {
   listController?.abort();
@@ -136,16 +179,6 @@ async function loadTasks(
       return;
     }
     tasks.value = result.items;
-    const retained = result.items.find(
-      ({ taskId }) => taskId === selectedTaskId.value,
-    );
-    const nextSelection = retained ?? result.items[0];
-    selectedTaskId.value = nextSelection?.taskId;
-    if (nextSelection === undefined) {
-      clearDetail();
-    } else {
-      void loadDetail(nextSelection.taskId);
-    }
   } catch (error) {
     if (requestId !== listRequest || isAbortError(error)) {
       return;
@@ -162,7 +195,10 @@ async function loadTasks(
 }
 
 function selectTask(taskId: string): void {
-  if (selectedTaskId.value === taskId && detail.value !== undefined) {
+  if (
+    selectedTaskId.value === taskId &&
+    (detail.value !== undefined || detailLoading.value)
+  ) {
     return;
   }
   selectedTaskId.value = taskId;
@@ -204,6 +240,7 @@ function clearDetail(): void {
 
 function retryDetail(): void {
   if (detailError.value?.status === 404) {
+    closePreview();
     refreshTasks();
   } else if (selectedTaskId.value !== undefined) {
     void loadDetail(selectedTaskId.value);
@@ -216,101 +253,77 @@ function sequenceNumber(index: number): string {
 </script>
 
 <template>
-  <main class="workbench task-workbench">
-    <section class="catalog-pane" aria-label="任务装载 list">
-      <form
-        class="filter-panel"
-        aria-label="Filter 任务与装载"
-        @submit.prevent="applyFilters"
+  <main class="list-page">
+    <PageHeader title="任务与装载" subtitle="任务与已保存的知识装载">
+      <FilterMenu
+        label="筛选"
+        :count="
+          Number(!!appliedFilters.status) +
+          Number(appliedFilters.workspace !== undefined)
+        "
       >
-        <fieldset class="workspace-filter">
-          <legend>工作区</legend>
-          <div class="segmented-control">
-            <button
-              type="button"
-              :aria-pressed="workspaceMode === 'ALL'"
-              @click="setWorkspaceMode('ALL')"
-            >
-              全部
-            </button>
-            <button
-              type="button"
-              :aria-pressed="workspaceMode === 'NULL'"
-              @click="setWorkspaceMode('NULL')"
-            >
-              未绑定
-            </button>
-            <button
-              type="button"
-              :aria-pressed="workspaceMode === 'NAMED'"
-              @click="setWorkspaceMode('NAMED')"
-            >
-              指定工作区
-            </button>
-          </div>
-          <label v-if="workspaceMode === 'NAMED'" class="exact-workspace">
-            <span>工作区名称</span>
-            <input
+        <FilterOptions
+          label="任务状态"
+          :model-value="filters.status"
+          :options="[
+            { value: '', label: '全部状态' },
+            { value: 'RUNNING', label: '进行中' },
+            { value: 'COMPLETED', label: '已完成' },
+            { value: 'CANCELLED', label: '已取消' },
+          ]"
+          @update:model-value="chooseStatus"
+        />
+        <FilterOptions
+          label="任务工作区"
+          :model-value="workspaceMode"
+          :options="[
+            { value: 'ALL', label: '全部' },
+            { value: 'NULL', label: '未绑定' },
+            { value: 'NAMED', label: '指定工作区' },
+          ]"
+          @update:model-value="chooseWorkspace"
+        />
+        <form
+          v-if="workspaceMode === 'NAMED'"
+          class="menu-input exact-workspace"
+          @submit.prevent="applyFilters"
+        >
+          <label
+            >工作区名称<input
               v-model="filters.workspace"
               list="task-workspace-suggestions"
-              autocomplete="off"
-            />
-            <datalist id="task-workspace-suggestions">
-              <option
-                v-for="workspace in workspaceSuggestions"
-                :key="workspace"
-                :value="workspace"
-              />
-            </datalist>
-            <small>建议名称来自当前结果。</small>
-          </label>
-        </fieldset>
-        <div class="filter-row two-fields">
-          <label>
-            <span>状态</span>
-            <select v-model="filters.status">
-              <option value="">全部状态</option>
-              <option value="RUNNING">进行中</option>
-              <option value="COMPLETED">已完成</option>
-              <option value="CANCELLED">已取消</option>
-            </select>
-          </label>
-          <label>
-            <span>显示条数</span>
-            <select v-model="filters.limit">
-              <option :value="20">20</option>
-              <option :value="50">50</option>
-              <option :value="100">100</option>
-            </select>
-          </label>
-        </div>
+              autocomplete="off" /></label
+          ><datalist id="task-workspace-suggestions">
+            <option
+              v-for="workspace in workspaceSuggestions"
+              :key="workspace"
+              :value="workspace"
+            /></datalist
+          ><button type="submit" class="quiet-button">应用工作区</button>
+        </form>
         <p v-if="filterError" class="field-error" role="alert">
           {{ filterError }}
         </p>
-        <div class="filter-actions">
-          <button type="submit" class="primary-button">应用筛选</button>
-          <button type="button" class="quiet-button" @click="resetFilters">
-            重置
-          </button>
-        </div>
-      </form>
-
-      <div class="result-heading">
-        <div>
-          <p class="eyebrow">浏览知识</p>
-          <h2>任务与装载</h2>
-        </div>
-        <button type="button" class="secondary-button" @click="refreshTasks">
-          刷新列表
+        <button type="button" class="menu-reset" @click="resetFilters">
+          清除筛选
         </button>
-      </div>
-      <p
-        v-if="!listLoading && !listError"
-        class="result-count"
-        aria-live="polite"
-      >
-        {{ tasks.length }} 条 · 当前返回结果
-      </p>
+      </FilterMenu>
+      <FilterMenu label="显示" icon="settings"
+        ><FilterOptions
+          label="显示条数"
+          :model-value="filters.limit"
+          :options="[
+            { value: 20, label: '20 条' },
+            { value: 50, label: '50 条' },
+            { value: 100, label: '100 条' },
+          ]"
+          @update:model-value="chooseLimit"
+      /></FilterMenu>
+      <button type="button" class="quiet-button" @click="refreshTasks">
+        <UiIcon name="refresh" />刷新
+      </button>
+    </PageHeader>
+    <section class="list-scroll" aria-label="任务装载列表">
       <div
         v-if="listLoading"
         class="state-panel compact"
@@ -335,47 +348,40 @@ function sequenceNumber(index: number): string {
         <strong>暂无任务装载</strong>
         <p>调整筛选条件或刷新列表。</p>
       </div>
-      <ol v-else class="asset-list task-list" aria-label="任务装载 results">
+      <ol v-else class="asset-list task-list" aria-label="任务装载结果">
         <li v-for="task in tasks" :key="task.taskId">
           <button
             type="button"
-            class="asset-card task-card"
-            :class="{ selected: selectedTaskId === task.taskId }"
-            :aria-current="selectedTaskId === task.taskId ? 'true' : undefined"
-            @click="selectTask(task.taskId)"
+            class="asset-row task-row"
+            :title="task.taskId"
+            @click="openTask(task.taskId)"
           >
-            <span class="asset-card-topline">
-              <span
-                class="status-label"
-                :class="`status-${task.status.toLowerCase()}`"
-                >{{ displayValue(task.status) }}</span
-              >
-              <span class="scope-label">{{
-                displayWorkspace(task.workspace)
-              }}</span>
-            </span>
-            <strong class="mono task-id">{{ task.taskId }}</strong>
-            <span class="asset-summary request-summary">{{
+            <UiIcon name="layers" /><span class="row-title">{{
               task.request
-            }}</span>
-            <span class="task-measures">
-              <span>{{ task.assetCount }} 条资产</span>
-              <span>{{ task.estimatedCharacters }} 字符</span>
-            </span>
-            <span class="asset-card-footer">
-              <time :datetime="task.createdAt"
-                >创建于 {{ formatDate(task.createdAt) }}</time
-              >
-              <time :datetime="task.updatedAt"
-                >更新于 {{ formatDate(task.updatedAt) }}</time
-              >
-            </span>
+            }}</span
+            ><span class="row-scope">{{
+              displayWorkspace(task.workspace)
+            }}</span
+            ><span class="tag" :class="`status-${task.status.toLowerCase()}`">{{
+              displayValue(task.status)
+            }}</span
+            ><span class="row-measure"
+              >{{ task.assetCount }} 条资产 ·
+              {{ task.estimatedCharacters }} 字符</span
+            ><time class="row-date" :datetime="task.updatedAt">{{
+              formatDate(task.updatedAt)
+            }}</time>
           </button>
         </li>
       </ol>
     </section>
-
-    <section class="detail-pane" aria-label="Selected 任务装载 detail">
+    <PreviewDialog
+      v-if="route.page === 'tasks' && route.id"
+      label="任务与装载详情"
+      :expanded="route.expanded"
+      @close="closePreview"
+      @expand="navigate('tasks', route.id, !route.expanded)"
+    >
       <div
         v-if="detailLoading"
         class="state-panel detail-state"
@@ -619,6 +625,6 @@ function sequenceNumber(index: number): string {
         <strong>选择一个任务</strong>
         <p>查看该任务已保存的知识装载与实际使用记录。</p>
       </div>
-    </section>
+    </PreviewDialog>
   </main>
 </template>

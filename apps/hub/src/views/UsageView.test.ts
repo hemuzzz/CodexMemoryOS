@@ -1,4 +1,10 @@
-import { flushPromises, mount, type DOMWrapper, type VueWrapper } from "@vue/test-utils";
+import {
+  enableAutoUnmount,
+  flushPromises,
+  mount,
+  type DOMWrapper,
+  type VueWrapper,
+} from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UsageListItem } from "../api/types";
@@ -17,10 +23,14 @@ const usage: UsageListItem = {
   workspace: "alpha",
 };
 
+enableAutoUnmount(afterEach);
+
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 
 beforeEach(() => {
-  fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ok: true, data: { items: [usage] } }));
+  fetchMock = vi
+    .fn<typeof fetch>()
+    .mockResolvedValue(jsonResponse({ ok: true, data: { items: [usage] } }));
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -33,14 +43,18 @@ describe("Usage view", () => {
     expect(wrapper.text()).toContain(usage.usageId);
     expect(wrapper.text()).toContain(usage.taskId);
     expect(wrapper.text()).toContain(usage.assetId);
-    expect(wrapper.text()).toContain("召回7");
-    expect(wrapper.text()).toContain("读取4");
+    expect(wrapper.findAll("tbody td")[3]?.text()).toBe("7");
+    expect(wrapper.findAll("tbody td")[4]?.text()).toBe("4");
     expect(wrapper.text()).toContain("已使用");
     expect(wrapper.text()).toContain("资产已缺失");
-    expect(wrapper.get(".usage-ledger").element.tagName).toBe("OL");
-    expect(wrapper.get(".usage-ledger > li").attributes("tabindex")).toBeUndefined();
+    expect(wrapper.get(".usage-table").element.tagName).toBe("TABLE");
+    expect(
+      wrapper.get(".usage-table tbody tr").attributes("tabindex"),
+    ).toBeUndefined();
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
-    expect(wrapper.text()).not.toMatch(/\b(Score|Trend|Ranking|Recommendation)\b/u);
+    expect(wrapper.text()).not.toMatch(
+      /\b(Score|Trend|Ranking|Recommendation)\b/u,
+    );
   });
 
   it("constructs taskId, assetId, Workspace, and limit as one AND query", async () => {
@@ -48,22 +62,32 @@ describe("Usage view", () => {
     const inputs = wrapper.findAll(".usage-id-filters input");
     await inputs[0]?.setValue(usage.taskId);
     await inputs[1]?.setValue(usage.assetId);
-    await wrapper.find(".usage-id-filters select").setValue("100");
+    await buttonNamed(wrapper, "100 条").trigger("click");
     await buttonNamed(wrapper, "指定工作区").trigger("click");
     await wrapper.get(".exact-workspace input").setValue("alpha");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
-    expect(fetchMock.mock.calls.some(([input]) => String(input) ===
-      `/api/usages?taskId=${usage.taskId}&assetId=${usage.assetId}&workspace=alpha&limit=100`
-    )).toBe(true);
-    expect(wrapper.text()).toContain(`任务 ${usage.taskId} · 资产 ${usage.assetId} · 工作区 alpha`);
+    expect(
+      fetchMock.mock.calls.some(
+        ([input]) =>
+          String(input) ===
+          `/api/usages?taskId=${usage.taskId}&assetId=${usage.assetId}&workspace=alpha&limit=100`,
+      ),
+    ).toBe(true);
+    expect(wrapper.text()).toContain(
+      `任务 ${usage.taskId} · 资产 ${usage.assetId} · 工作区 alpha`,
+    );
 
     await buttonNamed(wrapper, "未绑定").trigger("click");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
-    expect(fetchMock.mock.calls.some(([input]) => String(input) ===
-      `/api/usages?taskId=${usage.taskId}&assetId=${usage.assetId}&workspace=null&limit=100`
-    )).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(
+        ([input]) =>
+          String(input) ===
+          `/api/usages?taskId=${usage.taskId}&assetId=${usage.assetId}&workspace=null&limit=100`,
+      ),
+    ).toBe(true);
   });
 
   it("does not send whitespace-only or padded exact values", async () => {
@@ -83,7 +107,11 @@ describe("Usage view", () => {
 
   it("keeps the newer filtered response when an older request finishes later", async () => {
     const oldResult = deferred<Response>();
-    const newerUsage = { ...usage, taskId: "tsk2034512345678901299", usageId: "usg2034512345678901298" };
+    const newerUsage = {
+      ...usage,
+      taskId: "tsk2034512345678901299",
+      usageId: "usg2034512345678901298",
+    };
     fetchMock.mockImplementation(async (input) => {
       const path = String(input);
       if (path.includes(`taskId=${usage.taskId}`)) {
@@ -103,22 +131,38 @@ describe("Usage view", () => {
     await flushPromises();
     expect(wrapper.text()).toContain(newerUsage.usageId);
 
-    oldResult.resolve(jsonResponse({ ok: true, data: { items: [{ ...usage, usageId: "usg-stale" }] } }));
+    oldResult.resolve(
+      jsonResponse({
+        ok: true,
+        data: { items: [{ ...usage, usageId: "usg-stale" }] },
+      }),
+    );
     await flushPromises();
     expect(wrapper.text()).toContain(newerUsage.usageId);
     expect(wrapper.text()).not.toContain("usg-stale");
   });
 
   it("shows normal empty results and safe explicit recovery", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, data: { items: [] } }));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ ok: true, data: { items: [] } }),
+    );
     let wrapper = await mountLoadedView();
     expect(wrapper.text()).toContain("暂无使用记录");
     wrapper.unmount();
 
-    fetchMock.mockResolvedValueOnce(jsonResponse({
-      ok: false,
-      error: { code: "INTERNAL_ERROR", message: "private database detail", retryable: false },
-    }, 500));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "private database detail",
+            retryable: false,
+          },
+        },
+        500,
+      ),
+    );
     wrapper = await mountLoadedView();
     expect(wrapper.text()).toContain("本地服务未能完成请求");
     expect(wrapper.text()).not.toContain("private database detail");
@@ -133,7 +177,9 @@ describe("Usage view", () => {
     await buttonNamed(wrapper, "刷新记录").trigger("click");
     await flushPromises();
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+    expect(
+      fetchMock.mock.calls.every(([, init]) => init?.method === "GET"),
+    ).toBe(true);
   });
 });
 
@@ -144,7 +190,13 @@ async function mountLoadedView(): Promise<VueWrapper> {
 }
 
 function buttonNamed(wrapper: VueWrapper, name: string): DOMWrapper<Element> {
-  const button = wrapper.findAll("button").find((item) => item.text().trim() === name);
+  const button = wrapper
+    .findAll("button")
+    .find(
+      (item) =>
+        item.text().replace(/✓/g, "").trim() === name ||
+        item.attributes("aria-label") === name,
+    );
   if (button === undefined) {
     throw new Error(`Button not found: ${name}`);
   }
@@ -152,7 +204,10 @@ function buttonNamed(wrapper: VueWrapper, name: string): DOMWrapper<Element> {
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" }, status });
+  return new Response(JSON.stringify(body), {
+    headers: { "content-type": "application/json" },
+    status,
+  });
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {

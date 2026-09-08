@@ -15,12 +15,13 @@
     "typecheck": "vue-tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "5.2.9",
     "vue": "3.5.42"
   },
   "devDependencies": {
     "@types/node": "22.20.0",
-    "@vue/test-utils": "2.4.6",
     "@vitejs/plugin-vue": "6.0.8",
+    "@vue/test-utils": "2.4.6",
     "happy-dom": "20.11.15",
     "typescript": "6.0.3",
     "vite": "8.2.2",

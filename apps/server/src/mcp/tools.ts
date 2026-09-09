@@ -4,7 +4,7 @@ import { z } from "zod";
 import { assetIdSchema } from "../asset/schema.js";
 import type { StructuredLogger } from "../logging.js";
 import type { KnowledgeService } from "../knowledge/service.js";
-import { KnowledgeError, recallInputSchema, readInputSchema, usedInputSchema, scenarioInputSchema, capabilityIdsSchema, referenceSchema, hashSchema } from "../knowledge/model.js";
+import { KnowledgeError, recallInputSchema, readInputSchema, usedInputSchema, capabilityIdsSchema, referenceSchema, hashSchema } from "../knowledge/model.js";
 import { AssetNotAccessibleError, AssetNotFoundError, AssetSearchUnavailableError } from "../asset/index.js";
 export { recallInputSchema };
 // MCP requires an object root; services retain the strict mutually exclusive unions.
@@ -25,7 +25,7 @@ export interface AssetMcpDependencies {
   knowledgeService: KnowledgeService; logger: StructuredLogger; onInternalError?: (error: unknown) => void;
 }
 export function createAssetMcpServer(dependencies: AssetMcpDependencies): McpServer {
-  const server = new McpServer({ name: "codex-memory-os", version: "2.3.0" });
+  const server = new McpServer({ name: "codex-memory-os", version: "2.4.0" });
   const execute = async (operation: () => Promise<unknown>): Promise<CallToolResult> => {
     try {
       // Exactly one serialized representation: no duplicate structuredContent.
@@ -41,9 +41,6 @@ export function createAssetMcpServer(dependencies: AssetMcpDependencies): McpSer
   };
   server.registerTool("knowledge_recall", { description: "Recall knowledge with 1–8 concise search expressions in queries. Generate relevant terms and synonyms as you would for native memory; reuse suitable expressions for the same purpose. Terms within an expression are AND; expressions are OR. One deduplicated result shares the 8-asset/5000-character budget. Explicit capabilityIds selects scope; [] selects GLOBAL only.", inputSchema: recallInputSchema },
     async (input) => execute(() => dependencies.knowledgeService.recall(input)));
-  server.registerTool("scenario_list", { description: "List enabled applicable scenarios; does not activate them.", inputSchema: scenarioInputSchema,
-    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false } },
-    async (input) => execute(() => dependencies.knowledgeService.scenarios(input)));
   server.registerTool("asset_read", { description: "Read qualified current content. Provide exactly one target: recallItemId, or assetId with optional expectedContentHash.", inputSchema: assetReadToolInputSchema },
     async (input) => execute(() => dependencies.knowledgeService.read(input)));
   server.registerTool("asset_mark_used", { description: "Explicitly settle a persistent source that influenced work. Provide exactly one of recallItemId or readRef. Content evolution does not invalidate Used.", inputSchema: assetMarkUsedToolInputSchema,

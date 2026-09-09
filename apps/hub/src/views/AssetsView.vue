@@ -861,15 +861,12 @@ function presentError(
               </dl>
             </section>
             <section class="usage-section" aria-label="最近知识事实">
-              <h3>场景关系</h3>
-              <p v-if="!assetDetail.scenarioRelations.length">无场景关联。</p>
-              <p v-for="relation in assetDetail.scenarioRelations" :key="relation.scenarioId">{{ relation.name }} · {{ relation.mode }} · {{ relation.enabled ? "已启用" : "禁用" }}</p>
               <h3>最近召回与使用</h3>
               <p>只统计已持久事实；内容更新不重置该知识的累计使用。</p>
               <p v-if="!assetDetail.recentRecalls.length && !assetDetail.recentUsage.length">暂无已记录事实。</p>
               <div v-for="item in assetDetail.recentRecalls" :key="item.recallItemId" class="metadata-grid">
-                <code>{{ item.recallItemId }}</code><span>{{ item.bucket }} · {{ item.deliveredMode }}</span>
-                <span>{{ item.selectionReasons.join('、') }}</span><span>读取 {{ item.readCount }} · 使用 {{ item.totalUsedCount }}</span>
+                <code>{{ item.recallItemId }}</code><span>{{ item.deliveredMode }}</span>
+                <span>读取 {{ item.readCount }} · 使用 {{ item.totalUsedCount }}</span>
                 <span v-if="item.contentHash !== assetDetail.contentHash">内容已变化（仅显示交付证据）</span>
               </div>
               <div v-for="item in assetDetail.recentUsage" :key="item.id" class="metadata-grid">

@@ -1,7 +1,7 @@
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import { AssetCatalog, scanAssetRepository } from "./asset/index.js";
-import { KnowledgeRepository, migrateKnowledge, migrateRecallQueries } from "./knowledge/repository.js";
+import { KnowledgeRepository, migrateKnowledge, migrateRecallStorage } from "./knowledge/repository.js";
 
 export async function runMaintenanceCli(
   args: readonly string[] = process.argv.slice(2),
@@ -28,10 +28,10 @@ export async function runMaintenanceCli(
       if ((args.length !== 2 && args.length !== 3) || args[1] !== "--offline" || (args.length === 3 && args[2] !== "--initialize")) throw new Error("Use migrate-knowledge --offline [--initialize] after stopping writers");
       const schemaVersion = migrateKnowledge(databasePath, false, args[2] === "--initialize");
       stdout.write(`${JSON.stringify({ ok: true, schemaVersion })}\n`);
-    } else if (command === "migrate-recall-queries") {
-      if (args.length !== 2 || args[1] !== "--offline") throw new Error("Use migrate-recall-queries --offline after stopping the service and all same-database Hooks/writers");
-      migrateRecallQueries(databasePath);
-      stdout.write('{"ok":true,"schemaVersion":4}\n');
+    } else if (command === "migrate-recall") {
+      if (args.length !== 2 || args[1] !== "--offline") throw new Error("Use migrate-recall --offline after stopping the service and all same-database Hooks/writers");
+      migrateRecallStorage(databasePath);
+      stdout.write('{"ok":true,"schemaVersion":5}\n');
     } else if (command === "retire-old-runtime") {
       if (args.length !== 3 || args[1] !== "--offline" || !["--accept-data-deletion", "--accept-data-deletion-after-manual-verification"].includes(args[2] ?? "")) throw new Error("Explicit deletion acknowledgement required");
       const schemaVersion = migrateKnowledge(databasePath, true);
@@ -41,7 +41,7 @@ export async function runMaintenanceCli(
       const repository = new KnowledgeRepository(databasePath);
       try { stdout.write(JSON.stringify({ revoked: repository.db.prepare("DELETE FROM workspace_capability WHERE capability_key_hash=?").run(args[2]).changes }) + "\n"); }
       finally { repository.close(); }
-    } else { throw new Error("Expected rebuild-index, migrate-knowledge, migrate-recall-queries, retire-old-runtime or revoke-capability"); }
+    } else { throw new Error("Expected rebuild-index, migrate-knowledge, migrate-recall, retire-old-runtime or revoke-capability"); }
     return 0;
   } catch (error) {
     stderr.write(`${JSON.stringify({ ok: false, error: { code: "MAINTENANCE_FAILED", message: error instanceof Error ? error.message : String(error) } })}\n`);

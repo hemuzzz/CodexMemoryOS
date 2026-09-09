@@ -7,7 +7,7 @@ description: Assess reusable engineering knowledge before delivering engineering
 
 遵循安装位置同一 Codex home 下的 [KNOWLEDGE.md](../../KNOWLEDGE.md)。由智能体结合当前任务、已有知识和后续复用场景，自主判断内容是否具有沉淀价值，综合考虑信息增量、复用收益与证据充分性，并明确区分已验证事实和待验证判断。
 
-1. 无知识要点时结束评估，不作空检索。有要点时用 knowledge_recall：按 Recall Skill 提炼同一知识目的的 queries 表达数组，仅选择必要且已获授权的 capabilityIds，每次明确选择 Scenario；GLOBAL 用 []。不默认全选范围。
+1. 无知识要点时结束评估，不作空检索。有要点时用 knowledge_recall：按 Recall Skill 提炼同一知识目的的 queries 表达数组，仅选择必要且已获授权的 capabilityIds；GLOBAL 用 []。不默认全选范围。
 2. 比较实质相关正文：有持久 recallItemId 时据此 asset_read，否则用 assetId + expectedContentHash 读当前内容。已有检索与正文充分时复用，不为流程重复读取。摘要不是全文，无命中不是无历史。
 3. 比较结论、适用条件与证据，判断新增、扩展/修订、无增量或暂不能判断。访问缺口说明具体原因，继续主任务；不通过 Hub、直接文件路径或自填 Workspace 绕过访问边界。
 4. 只有获授权且值得沉淀时，在已确认目标 Workspace 的 Inbox 准备候选。访问能力不是文件写入授权；只读、禁止知识写入或目标不清楚时仅展示建议。按 KNOWLEDGE.md 中的明确链接读取知识内容模型，不按当前业务仓库解析模板路径。

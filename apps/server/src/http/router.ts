@@ -108,10 +108,6 @@ export function createRestApiApp(dependencies: RestApiDependencies): Hono {
     parseStrictQuery(context, [], z.object({}).strict());
     return success(context, await dependencies.projection.workspaces());
   });
-  app.get("/api/scenarios", async (context) => {
-    parseStrictQuery(context, [], z.object({}).strict());
-    return success(context, await dependencies.projection.scenarios());
-  });
   app.get("/api/recalls", (context) => {
     const query = parseStrictQuery(context, ["offset", "limit"], factListQuerySchema);
     return success(context, dependencies.projection.recalls(query.offset, query.limit));

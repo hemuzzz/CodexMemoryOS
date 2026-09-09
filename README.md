@@ -174,12 +174,11 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 \
 - Hub：`http://127.0.0.1:3000/`
 - 健康检查：`http://127.0.0.1:3000/health`
 - MCP：`http://127.0.0.1:3000/mcp`
-- 七个只读 REST：
+- 只读 REST：
   - `GET /api/assets`
   - `GET /api/assets/:assetId`
   - `GET /api/inbox`
   - `GET /api/workspaces`
-  - `GET /api/scenarios`
   - `GET /api/recalls`
   - `GET /api/recalls/:recallId`
   - `GET /api/usage`
@@ -189,35 +188,34 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 \
 
 使用 `Ctrl-C`（SIGINT）停止前台进程；进程管理器也可发送 SIGTERM。Server 会关闭 HTTP 连接、Watcher 和 SQLite 连接。应先启动 Server，再启动依赖它的 Codex MCP Client；不要为此项目额外建设守护进程或服务管理平台。
 
-## Codex Hook 与 MCP（2.3 源码）
+## Codex Hook 与 MCP（2.4 源码）
 
 新版源码取消业务Task、Session/Turn、Loadout依赖。Hook将真实cwd项目和明确预授权项目交付为持续能力，附项目名称、别名、说明；不解析Prompt、不自动执行Recall。Recall Skill自动识别项目业务、表/接口、故障与历史判断请求，先召回，再核对当前源码；每次只选择相关能力，不受会话cwd限制。2026-09-09已完成本机真实能力传递、别名选择、双项目召回与Used结算验收，用户确认本轮验收成功、无阻碍；模型路径参数不授予权限。
 
-2.2历史安装过程见 [2.2 实施与人工切换](项目文档/验证记录/04-设计2.2实现与人工切换.md)。升级当前源码需执行下方2.3升级步骤；完整协议位于 `integrations/codex/`，不要只更新后端。
+2.2历史安装过程见 [2.2 实施与人工切换](项目文档/验证记录/04-设计2.2实现与人工切换.md)。升级当前源码需执行下方2.4升级步骤；完整协议位于 `integrations/codex/`，不要只更新后端。
 
 | 正常 MCP 工具 | 输入与行为 |
 |---|---|
-| knowledge_recall | capabilityIds[]、queries[]、scenarios可选；项内AND、项间OR，Asset最佳匹配去重后两桶4/4不足回流，所有表达共享最多8项、完整JSON最多5000 Unicode code points |
-| scenario_list | capabilityIds[]、offset/limit可选；纯读取适用的启用场景 |
+| knowledge_recall | capabilityIds[]、queries[]；项内AND、项间OR，Asset按最佳匹配去重并统一排序，所有表达共享最多8项、完整JSON最多5000 Unicode code points |
 | asset_read | capabilityIds[] + recallItemId，或assetId + expectedContentHash可选；当前Hash契约，正文上限256000 UTF-8字节 |
 | asset_mark_used | capabilityIds[] + recallItemId或readRef；实际影响才使用，来源幂等，允许内容演进后的合法旧引用 |
 
-capabilityIds必填且最多8个，[]只访问GLOBAL；queries必填1–8项，每项1–256字符、不含控制字符，大小写/空白差异去重。旧query输入拒绝。Scenario最多4个，单ID最大40字符。能力持久层只保存SHA-256摘要，无TTL；映射变化或明确撤销失效，不因时间、重启或无关配置变化失效。单个Workspace名称最多128字符、禁止控制字符。预授权关闭后，由预授权签发的额外能力失效；由真实cwd签发的能力仍按原映射校验。恢复同一预授权配置可能恢复其未撤销能力，永久失效仍须显式撤销摘要。
+capabilityIds必填且最多8个，[]只访问GLOBAL；queries必填1–8项，每项1–256字符、不含控制字符，大小写/空白差异去重。旧query和其他未知输入拒绝。能力持久层只保存SHA-256摘要，无TTL；映射变化或明确撤销失效，不因时间、重启或无关配置变化失效。单个Workspace名称最多128字符、禁止控制字符。预授权关闭后，由预授权签发的额外能力失效；由真实cwd签发的能力仍按原映射校验。恢复同一预授权配置可能恢复其未撤销能力，永久失效仍须显式撤销摘要。
 
 模型像搜索原生Memories一样提炼同义表达和有依据的中英文/代码名称；同目的已有适用表达直接复用，无需先调用原生检索。例：`queries: ["业务字典", "字典配置", "dictconfig", "sys_dict"]`。服务端复用现有文字/FTS匹配，不自动扩词、不把`a|b`解释为OR、不按同义命中次数加分。Recall记录与Hub保留本次完整表达数组。
 
 Recall/Read事实写失败仍交付合格知识，usageRecorded=false、无本次稳定引用。Used失败明确报错。Usage按assetId跨内容累计，不按Hash分版本；旧引用Read遇内容更新仍返回CONTENT_CHANGED。正常MCP无asset_search和旧装配工具；Hub搜索保持纯检索。
 
-策略原件为 `CODEX_MEMORY_OS_WORKSPACES_PATH` 同目录的 `recall-policy.json`。缺失/损坏时关闭增强、保留基础召回；未知Workspace绑定单项隔离。示例 `integrations/codex/recall-policy.example.json` 的场景全部禁用，没有生成真实关系或启用策略。
+MEMORY匹配分数达到现有阈值且预算允许时返回摘要，其他条目通过引用按需Read；DOCUMENT/SKILL保持引用交付。全部候选使用一个排序序列，不预留固定资料名额。
 
 MCP仍使用本地回环 `/mcp` 和原有Host/Origin检查。注册示例见 `integrations/codex/mcp.toml.example`；注册本身不等于真实客户端已采用协议。
 
-### 多表达召回升级（2.3）
+### 召回存储升级（2.4）
 
-本节是待执行的运行环境切换步骤，源码实现和测试不执行这些生产操作。需同时升级数据库、Server/Hub构建及`integrations/codex/`中的KNOWLEDGE、Recall、capture协议，再重载客户端；不能先给旧服务安装queries协议。
+本机已于2026-09-10获用户授权完成2.4真实切换；用户明确要求不创建新备份，真实数据保留与MCP/Hub结果见[切换验证记录](项目文档/验证记录/07-检索模型清理验证.md#2026-09-10-真实切换)。下面保留其他环境的升级步骤。需同时升级数据库、Server/Hub构建及`integrations/codex/`中的KNOWLEDGE、Recall、capture协议，再重载客户端；安装状态以manifest与实际文件Hash为准。
 
-1. 停止服务及所有同库Hook/写入方，保留可恢复的数据库、构建产物与已安装协议备份。核对数据库绝对路径。旧schema-1或全新环境先按2.2流程执行knowledge:migrate到2；已有2/3无需重跑初始化。
-2. 构建当前源码后，显式离线升级到schema-4：
+1. 停止服务及所有同库Hook/写入方，保留可恢复的数据库、构建产物与已安装协议备份。核对数据库绝对路径。当前knowledge:migrate对schema-1或全新环境直接初始化到5；已有schema-2/3/4运行下一步，无需重新初始化。
+2. 构建当前源码后，显式离线升级到schema-5：
 
    ```bash
    CODEX_MEMORY_OS_DATABASE_PATH='/absolute/data/codex-memory.sqlite' \
@@ -225,10 +223,10 @@ MCP仍使用本地回环 `/mcp` 和原有Host/Origin检查。注册示例见 `in
      pnpm --filter @codex-memory-os/server recall:migrate --offline
    ```
 
-   该命令只把历史query原样包成单元素JSON数组，保留ID、时间、范围、条目、Read/Used、能力、Catalog/FTS与正文双版；失败整笔回滚，可重试。不会清空数据或代替旧Task表退役。新服务遇旧Schema明确要求迁移，不在启动时自动修改。
-3. 按manifest核对待安装文件与当前基线，完成协议安装、启动服务、重载Codex。检查MCP发布queries数组并实际用多表达召回，核对Hub列表/详情与旧记录、完整5000字符预算、Read/Used和真实Hook能力传递。单纯构建或SDK测试不能代替此步。
+   该命令把schema-2/3历史query原样包成单元素JSON数组，保留schema-4的原数组，裁剪退役配置列、来源分桶字段及相应诊断；保留操作/条目ID、时间、范围、Hash、Read/Used引用、能力、Catalog/FTS与正文双版。失败整笔回滚，可幂等重试。不会清空操作记录或代替旧Task表退役。新服务遇旧Schema明确要求迁移，不在启动时自动修改。
+3. 按manifest核对待安装文件与当前基线，完成协议安装、启动服务、重载Codex。检查MCP仅发布Recall/Read/Used三个工具，Recall只接收capabilityIds与queries；实际用多表达召回，核对Hub列表/详情与旧记录、完整5000字符预算、Read/Used和真实Hook能力传递。单纯构建或SDK测试不能代替此步。
 
-若需要恢复2.2，应在停止所有写入后恢复同批数据库、构建和协议备份，不能仅降级程序读取schema-4。
+若需要恢复旧版，应在停止所有写入后恢复同批数据库、构建和协议备份，不能仅降级程序读取schema-5。
 
 ## 单文件人工确认
 
@@ -316,5 +314,5 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/server rebu
 
 - 2026-09-09本机2.2及自动项目识别修订已获用户验收确认，无本轮阻碍；实际检查与范围裁定见实施记录，不将人工验收等同于全仓自动测试通过。
 - 旧协议自动测试与smoke仍保留历史用例，尚未适配新契约；不能作为新版验收依据。现有typecheck包含这些旧测试，源码检查请用typecheck:source，未修改原测试命令或削弱断言。
-- 本地协议、数据库与服务已切换，真实宿主能力交付和Skill选择已验证。Scenario保持未启用，净收益评估不纳入本轮放行条件。
+- 2.4本地构建、schema-5迁移、协议安装及真实MCP/Hub验证已完成；当前任务使用宿主已交付的有效能力验证，新用户轮次的自动Hook/Skill触发未在本轮重演，不能用SDK工具发现代替该项。
 - 手动迁移与启动步骤、数据保留边界及验收清单见 [2.2 实施与人工切换](项目文档/验证记录/04-设计2.2实现与人工切换.md)。

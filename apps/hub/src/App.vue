@@ -15,15 +15,14 @@ const navigation: { page: Page; label: string; icon: string }[] = [
   { page: "library", label: "知识资产", icon: "library" },
   { page: "inbox", label: "收件箱", icon: "inbox" },
   { page: "workspaces", label: "工作区", icon: "layers" },
-  { page: "scenarios", label: "场景", icon: "layers" },
   { page: "recalls", label: "召回记录", icon: "search" },
   { page: "usage", label: "使用记录", icon: "activity" },
   { page: "status", label: "系统状态", icon: "settings" },
 ];
 const view = computed(
   () =>
-    ({ overview: OverviewView, workspaces: KnowledgeView, scenarios: KnowledgeView, recalls: KnowledgeView, usage: KnowledgeView, status: SystemStatusView })[
-      route.value.page as "overview" | "workspaces" | "scenarios" | "recalls" | "usage" | "status"
+    ({ overview: OverviewView, workspaces: KnowledgeView, recalls: KnowledgeView, usage: KnowledgeView, status: SystemStatusView })[
+      route.value.page as "overview" | "workspaces" | "recalls" | "usage" | "status"
     ] ?? AssetsView,
 );
 function documentMainFocus() {

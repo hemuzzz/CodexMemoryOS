@@ -38,7 +38,6 @@ export interface AssetUsageSummary { readCount: number; recallCount: number; tot
 export type { RecallProjection, ItemProjection, UsageProjection } from "../../../server/src/knowledge/projection.js";
 import type { ItemProjection, UsageProjection, KnowledgeProjection } from "../../../server/src/knowledge/projection.js";
 export type WorkspaceProjection = Awaited<ReturnType<KnowledgeProjection["workspaces"]>>;
-export type ScenarioProjection = Awaited<ReturnType<KnowledgeProjection["scenarios"]>>;
 export type RecallDetail = NonNullable<ReturnType<KnowledgeProjection["recall"]>>;
 
 export interface AssetDetail extends AssetLibraryItem {
@@ -46,7 +45,6 @@ export interface AssetDetail extends AssetLibraryItem {
   rawMarkdown: string;
   recentRecalls: ItemProjection[];
   recentUsage: UsageProjection[];
-  scenarioRelations: { scenarioId: string; name: string; enabled: boolean; mode: string }[];
   renderedMarkdown: string;
   usageSummary: AssetUsageSummary;
 }

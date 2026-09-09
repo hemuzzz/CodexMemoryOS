@@ -27,7 +27,6 @@ export interface AssetDetailDto {
   rawMarkdown: string;
   recentRecalls: ItemProjection[];
   recentUsage: UsageProjection[];
-  scenarioRelations: { scenarioId: string; name: string; enabled: boolean; mode: string }[];
   relativePath: string;
   renderedMarkdown: string;
   scope: Awaited<ReturnType<AssetSearchService["readLibrary"]>>["frontmatter"]["scope"];
@@ -67,7 +66,6 @@ export class HubAssetApplicationService {
       rawMarkdown: asset.markdown,
       recentRecalls: this.projection.items("i.asset_id=?", assetId),
       recentUsage: this.projection.usage(0, 20, assetId).items,
-      scenarioRelations: (await this.projection.scenarios()).scenarios.flatMap((scenario) => scenario.assets.filter((relation) => relation.assetId === assetId).map((relation) => ({ scenarioId: scenario.id, name: scenario.name, enabled: scenario.enabled, mode: relation.mode }))),
       relativePath: asset.relativePath,
       renderedMarkdown: this.#renderer.render(asset.bodyMarkdown),
       scope: asset.frontmatter.scope,

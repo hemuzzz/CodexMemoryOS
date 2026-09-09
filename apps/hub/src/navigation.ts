@@ -6,7 +6,6 @@ export type Page =
   | "search"
   | "inbox"
   | "workspaces"
-  | "scenarios"
   | "recalls"
   | "usage"
   | "status";
@@ -16,7 +15,6 @@ const pages: Page[] = [
   "search",
   "inbox",
   "workspaces",
-  "scenarios",
   "recalls",
   "usage",
   "status",

@@ -8,9 +8,9 @@ enableAutoUnmount(afterEach);
 afterEach(() => vi.unstubAllGlobals());
 const operation: RecallProjection = {
   recallId: "usg123", authorizedWorkspaces: ["alpha"], queries: ["业务字典", "DictConfig", "字典配置", "sys_dict", "<script>alert(1)</script>"],
-  scenarios: [], policyHash: null, occurredAt: "2026-09-09T08:00:00.000Z", diagnostics: ["POLICY_MISSING"],
+  occurredAt: "2026-09-09T08:00:00.000Z", diagnostics: ["CHARACTER_LIMIT"],
   budget: { maxAssets: 8, maxModelVisibleCharacters: 5000, modelVisibleCharacters: 1200, knowledgeContentCharacters: 120,
-    metadataCharacters: 1080, deliveredAssets: 2, directBucketAssets: 0, queryBucketAssets: 2, omittedCount: 0, downgradedCount: 0 },
+    metadataCharacters: 1080, deliveredAssets: 2, omittedCount: 0, downgradedCount: 0 },
 };
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 beforeEach(() => {
@@ -32,7 +32,7 @@ it("shows every expression in the list and detail, preserves navigation, and esc
   await wrapper.get("button.recall-expressions").trigger("click"); await flushPromises();
   expect(fetchMock.mock.calls.some(([path]) => path === "/api/recalls/usg123")).toBe(true);
   expect(wrapper.findAll("ul.recall-expressions li").map(node => node.text())).toEqual(operation.queries);
-  expect(wrapper.text()).toContain("POLICY_MISSING");
+  expect(wrapper.text()).toContain("CHARACTER_LIMIT");
   expect(wrapper.find("script").exists()).toBe(false);
   const back = wrapper.findAll("button").find(button => button.text() === "返回召回列表")!;
   await back.trigger("click"); await flushPromises();

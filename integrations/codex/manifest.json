@@ -1,23 +1,24 @@
 {
-  "status": "2026-09-09 多表达召回2.3已完成本地构建、schema-3到4迁移与服务重启；3份已安装协议Hash与准备稿一致。真实HTTP MCP三表达召回返回5项，Hub REST记录完整表达。用户后续真实任务已提交多表达，但原生词复用有差异；Recall Skill经离线消融后获用户授权采用五步精简稿，已删除全部示例并同步安装，实际模型行为效果待观察。",
+  "status": "2026-09-10 用户授权完成2.4真实切换并明确不创建备份。已构建Server/Hub、迁移schema-4到5、安装KNOWLEDGE/Recall/capture及全局知识规则、恢复Hook并重启服务。真实MCP召回、迁移前引用Read/Used和Hub浏览通过；6份完整安装文件Hash与准备稿一致，全局规则仅替换知识节。新用户轮次的Hook交付和Skill自动触发未在本轮重演。baselineSha256保留本次切换前Hash，installedSha256为切换后Hash。",
+  "previousStatus": "2026-09-09 多表达召回2.3已完成本地构建、schema-3到4迁移与服务重启；3份已安装协议Hash与准备稿一致。Recall Skill保留五步精简结构；真实任务在加载该稿后仍丢弃业务原词，重放原词命中5项、改写词零命中。现已获用户授权将第2步改为逐项保留同目的原生词、补充词只追加，无原生词时保留业务名称独立项，并同步安装。新规则的实际模型行为效果待验证。",
   "files": [
     {
       "target": "/Users/hemu/.codex/KNOWLEDGE.md",
       "prepared": "integrations/codex/KNOWLEDGE.md",
-      "baselineSha256": "38d8971f0a3a7bbdc1f7746e6fc7ca8881955fa880ed95c704d200e469ad514b",
-      "preparedSha256": "1c754d31ef0f9842fb3676c84452d51092d837ba628d1a59fee973f19cf4389d",
+      "baselineSha256": "1c754d31ef0f9842fb3676c84452d51092d837ba628d1a59fee973f19cf4389d",
+      "preparedSha256": "acb83289e43771b392a813eaf515ab727a732c35f01fa7ed5973a5e98684bfd6",
       "installed": true,
       "initialBaselineSha256": "57b629c0ae698236d689aaed43dc81c695f85c3a542dbe8059feabf4131d0440",
-      "installedSha256": "1c754d31ef0f9842fb3676c84452d51092d837ba628d1a59fee973f19cf4389d"
+      "installedSha256": "acb83289e43771b392a813eaf515ab727a732c35f01fa7ed5973a5e98684bfd6"
     },
     {
       "target": "/Users/hemu/.codex/skills/memory-recall/SKILL.md",
       "prepared": "integrations/codex/skills/memory-recall/SKILL.md",
-      "baselineSha256": "9f3859c9a2283352fad6b048e2c28c4efac3aced7d2b2349d7471084f7b2897b",
-      "preparedSha256": "0c215f16f9d07d501117107794c2e4bebc284f069cf2b6e0f87781ac491c6f2d",
+      "baselineSha256": "37b771221e7350bb26d7782904bb7e0010a12bc756710fb5c7a9b84f5eeea3b8",
+      "preparedSha256": "8102d718ce49c91be2d0cc787ea0e173dac59bc4e1efbd8caaa77899a288b9b7",
       "installed": true,
       "initialBaselineSha256": "8a340a5f40bb03f03bb2ec48e96fbad426d3c0a6f1ece23399bef2b95aa07f83",
-      "installedSha256": "0c215f16f9d07d501117107794c2e4bebc284f069cf2b6e0f87781ac491c6f2d"
+      "installedSha256": "8102d718ce49c91be2d0cc787ea0e173dac59bc4e1efbd8caaa77899a288b9b7"
     },
     {
       "target": "/Users/hemu/.codex/skills/memory-usage-settlement/SKILL.md",
@@ -31,11 +32,11 @@
     {
       "target": "/Users/hemu/.codex/skills/knowledge-capture/SKILL.md",
       "prepared": "integrations/codex/skills/knowledge-capture/SKILL.md",
-      "baselineSha256": "b878bd26a060e32f01effe013e830857e82ee0e59a759b1b990ddff146fb89d2",
-      "preparedSha256": "ef6651efb40179fb54be485295913f100703424ac047c7a5a7909bb803e0d4b9",
+      "baselineSha256": "ef6651efb40179fb54be485295913f100703424ac047c7a5a7909bb803e0d4b9",
+      "preparedSha256": "3ef6176b7a265adbe178d95c3343effe52cdc425810fe262bc37914eafa28528",
       "installed": true,
       "initialBaselineSha256": "fae42c0446e41cf120ceee5e14145f94c4d411087d3ebaa3a611f8e2301b3571",
-      "installedSha256": "ef6651efb40179fb54be485295913f100703424ac047c7a5a7909bb803e0d4b9"
+      "installedSha256": "3ef6176b7a265adbe178d95c3343effe52cdc425810fe262bc37914eafa28528"
     },
     {
       "target": "/Users/hemu/.codex/skills/memory-recall/agents/openai.yaml",
@@ -59,9 +60,9 @@
       "target": "/Users/hemu/.codex/AGENTS.md",
       "prepared": "integrations/codex/AGENTS-knowledge-section.md",
       "action": "仅替换工程知识节，保留其他规则",
-      "baselineSha256": "6c6887891c9a282a19cf49e682da2294564797ebbd5b800fd936019bbe2d83e3",
-      "preparedSha256": "2e9dae44e73ad6ff795fdb7922dcaf289634328641d823b21acf1fea53012368",
-      "installedSha256": "3e6903b8c0cfaf433fdc07798b49a9012ba78a118878ea6842c209ebf53c1f6e",
+      "baselineSha256": "e3dd7d62640fe4da5f2eb19afd5cd06d895b747b7a79d527070a6c0a189f1af2",
+      "preparedSha256": "732f67876a0fc33cdc550510af8a4ef1bea0f1cf11caa6466e7aba0844614b79",
+      "installedSha256": "66a556a59cfd12898cf7507114f82f7509c9d56831b716d3c68c2cab27bcc131",
       "installed": true
     },
     {
@@ -74,11 +75,39 @@
       "installed": true
     }
   ],
+  "runtimeCutover24": {
+    "date": "2026-09-10",
+    "backupCreated": false,
+    "backupDecision": "用户明确要求不用备份直接切换；下方其他backupDirectory属于历史切换，与本次无关。",
+    "fromSchemaVersion": 4,
+    "schemaVersion": 5,
+    "mcpVersion": "2.4.0",
+    "serverPidAtVerification": 43741,
+    "port": 18888,
+    "verification": {
+      "build": "PASS",
+      "integrityCheck": "ok",
+      "foreignKeyViolations": 0,
+      "migrationPreservation": "12张表按裁剪后保留字段逐行Hash比较一致；45份知识文件Hash及Workspace配置不变。",
+      "serviceReadiness": "READY",
+      "watcherState": "RUNNING",
+      "catalogCount": 45,
+      "ftsCount": 45,
+      "liveMcpRecallId": "usg301342183876195924560540869959655932829549924734896275844",
+      "modelVisibleCharacters": 861,
+      "preservedRecallItemId": "usg301341884612326965468983752017072831664449655457240058781",
+      "liveReadRef": "usg301342231202302166582315711265040092619888840667767148205",
+      "usedId": "usg301342283904850467437047120109550627419702463975374938459",
+      "hubBrowser": "PASS",
+      "hookRegistrationChanged": false,
+      "newTurnAutomaticHookAndSkill": "NOT_REPLAYED"
+    }
+  },
   "backupDirectory": "knowledge-base/backups/preauthorized-cutover-20260909-093644",
   "multiExpressionCutover": {
     "date": "2026-09-09",
     "backupDirectory": "knowledge-base/backups/multi-query-20260909-170556",
-    "backupProtocolState": "codex-protocol.tgz保存切换前已安装的2.3协议；schema-3-rollback-protocol.tgz由已审核protocol.diff反向还原，三份文件均与2.2 baselineSha256一致，供旧构建与schema-3数据库配套恢复。",
+    "backupProtocolState": "codex-protocol.tgz保存切换前已安装的2.3协议；schema-3-rollback-protocol.tgz由当时已审核的差异反向还原，三份文件均与当时2.2 baselineSha256一致，供旧构建与schema-3数据库配套恢复。",
     "fromSchemaVersion": 3,
     "schemaVersion": 4,
     "mcpVersion": "2.3.0",

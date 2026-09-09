@@ -7,12 +7,11 @@ const schema = `
 CREATE TABLE workspace_capability (capability_key_hash TEXT PRIMARY KEY, workspace TEXT NOT NULL,
  created_at TEXT NOT NULL, trusted_workspace_mapping_hash TEXT NOT NULL);
 CREATE TABLE recall_operation (recall_id TEXT PRIMARY KEY, authorized_workspaces_json TEXT NOT NULL,
- query TEXT NOT NULL, active_scenarios_json TEXT NOT NULL, policy_hash TEXT, occurred_at TEXT NOT NULL,
+ queries_json TEXT NOT NULL, occurred_at TEXT NOT NULL,
  diagnostics_json TEXT NOT NULL, budget_json TEXT NOT NULL);
 CREATE TABLE recall_item (recall_item_id TEXT PRIMARY KEY, recall_id TEXT NOT NULL REFERENCES recall_operation(recall_id),
  asset_id TEXT NOT NULL, content_hash TEXT NOT NULL, asset_scope TEXT NOT NULL, asset_workspace TEXT,
- selection_reasons_json TEXT NOT NULL, bucket TEXT NOT NULL CHECK(bucket IN ('DIRECT','QUERY')),
- requested_mode TEXT, delivered_mode TEXT NOT NULL, delivery_reasons_json TEXT NOT NULL, ordinal INTEGER NOT NULL,
+ delivered_mode TEXT NOT NULL, delivery_reasons_json TEXT NOT NULL, ordinal INTEGER NOT NULL,
  CHECK ((asset_scope='GLOBAL' AND asset_workspace IS NULL) OR (asset_scope='WORKSPACE' AND asset_workspace IS NOT NULL)),
  UNIQUE(recall_id,asset_id), UNIQUE(recall_id,ordinal));
 CREATE TABLE read_operation (read_ref TEXT PRIMARY KEY, authorized_workspaces_json TEXT NOT NULL,
@@ -34,18 +33,18 @@ export function migrateKnowledge(databasePath: string, retire = false, initializ
     db.pragma("foreign_keys = ON");
     db.transaction(() => {
       const version = db.pragma("user_version", { simple: true });
-      if (retire && version !== 2 && version !== 3 && version !== 4) throw new KnowledgeError("MIGRATE_AND_VERIFY_BEFORE_RETIREMENT");
+      if (retire && ![2, 3, 4, 5].includes(Number(version))) throw new KnowledgeError("MIGRATE_AND_VERIFY_BEFORE_RETIREMENT");
       if (version === 0 && initialize) {
         const existing = db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
         if (existing.length) throw new KnowledgeError("INITIALIZE_REQUIRES_EMPTY_DATABASE");
         db.exec(CONTENT_VERSION_TABLE_SQL);
-        db.exec(schema); db.pragma("user_version = 2");
+        db.exec(schema); db.pragma("user_version = 5");
       }
-      else if (version === 1) { db.exec(schema); db.pragma("user_version = 2"); }
-      else if (version !== 2 && version !== 3 && version !== 4) throw new KnowledgeError("KNOWLEDGE_SCHEMA_UNSUPPORTED");
+      else if (version === 1) { db.exec(schema); db.pragma("user_version = 5"); }
+      else if (![2, 3, 4, 5].includes(Number(version))) throw new KnowledgeError("KNOWLEDGE_SCHEMA_UNSUPPORTED");
       if (retire && version !== 3) {
         db.exec("DROP TABLE IF EXISTS task_asset_usage; DROP TABLE IF EXISTS task_turn_binding; DROP TABLE IF EXISTS task_loadout;");
-        if (version !== 4) db.pragma("user_version = 3");
+        if (Number(version) < 4) db.pragma("user_version = 3");
       }
       if ((db.pragma("foreign_key_check") as unknown[]).length) throw new KnowledgeError("KNOWLEDGE_SCHEMA_INVALID");
     }).immediate();
@@ -54,17 +53,28 @@ export function migrateKnowledge(databasePath: string, retire = false, initializ
 }
 
 /** Preserve historical query text exactly as one expression, even if it looks like JSON. */
-export function migrateRecallQueries(databasePath: string): void {
+export function migrateRecallStorage(databasePath: string): void {
   const db = new Database(databasePath, { fileMustExist: true });
   try {
     db.pragma("foreign_keys = ON");
     db.transaction(() => {
       const version = Number(db.pragma("user_version", { simple: true }));
-      if (version !== 2 && version !== 3 && version !== 4) throw new KnowledgeError("KNOWLEDGE_SCHEMA_UNSUPPORTED");
-      if (version !== 4) {
+      if (![2, 3, 4, 5].includes(version)) throw new KnowledgeError("KNOWLEDGE_SCHEMA_UNSUPPORTED");
+      if (version < 4) {
         db.exec("ALTER TABLE recall_operation RENAME COLUMN query TO queries_json");
         db.exec("UPDATE recall_operation SET queries_json = json_array(queries_json)");
-        db.pragma("user_version = 4");
+      }
+      if (version < 5) {
+        // Legacy names are confined to the offline upgrade; keep all operation identities and references.
+        db.exec(`ALTER TABLE recall_operation DROP COLUMN active_scenarios_json;
+          ALTER TABLE recall_operation DROP COLUMN policy_hash;
+          ALTER TABLE recall_item DROP COLUMN selection_reasons_json;
+          ALTER TABLE recall_item DROP COLUMN bucket;
+          ALTER TABLE recall_item DROP COLUMN requested_mode;
+          UPDATE recall_operation SET budget_json=json_remove(budget_json, '$.directBucketAssets', '$.queryBucketAssets'),
+            diagnostics_json=(SELECT json_group_array(value) FROM json_each(diagnostics_json)
+              WHERE value NOT GLOB 'POLICY_*' AND value <> 'SCENARIO_SKIPPED');`);
+        db.pragma("user_version = 5");
       }
       db.prepare("SELECT queries_json FROM recall_operation LIMIT 0").all();
       if ((db.pragma("foreign_key_check") as unknown[]).length) throw new KnowledgeError("KNOWLEDGE_SCHEMA_INVALID");
@@ -78,7 +88,7 @@ export class KnowledgeRepository {
     this.db = new Database(databasePath, { fileMustExist: true, timeout: 1000 });
     try {
       this.db.pragma("foreign_keys = ON");
-      if (Number(this.db.pragma("user_version", { simple: true })) !== 4) throw new KnowledgeError("KNOWLEDGE_MIGRATION_REQUIRED");
+      if (Number(this.db.pragma("user_version", { simple: true })) !== 5) throw new KnowledgeError("KNOWLEDGE_MIGRATION_REQUIRED");
       for (const table of ["workspace_capability", "recall_operation", "recall_item", "read_operation", "used_event"]) this.db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();
       this.db.prepare("SELECT queries_json FROM recall_operation LIMIT 0").all();
     } catch (error) { this.db.close(); throw error; }
@@ -88,12 +98,12 @@ export class KnowledgeRepository {
     this.write(() => {
       for (const item of result.items) assertSourceScope(item, result.authorizedWorkspaces);
       this.db.prepare(`INSERT INTO recall_operation (recall_id, authorized_workspaces_json, queries_json,
-        active_scenarios_json, policy_hash, occurred_at, diagnostics_json, budget_json) VALUES (?,?,?,?,?,?,?,?)`).run(result.recallId,
-        JSON.stringify(result.authorizedWorkspaces), JSON.stringify(result.queries), JSON.stringify(result.scenarios), result.policyHash ?? null,
+        occurred_at, diagnostics_json, budget_json) VALUES (?,?,?,?,?,?)`).run(result.recallId,
+        JSON.stringify(result.authorizedWorkspaces), JSON.stringify(result.queries),
         result.occurredAt, JSON.stringify(result.diagnostics), JSON.stringify(result.budget));
-      const insert = this.db.prepare("INSERT INTO recall_item VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+      const insert = this.db.prepare("INSERT INTO recall_item VALUES (?,?,?,?,?,?,?,?,?)");
       result.items.forEach((item, ordinal) => insert.run(item.recallItemId, result.recallId, item.assetId, item.contentHash,
-        item.assetScope, item.assetWorkspace, JSON.stringify(item.selectionReasons), item.bucket, item.requestedMode ?? null,
+        item.assetScope, item.assetWorkspace,
         item.deliveredMode, JSON.stringify(item.deliveryReasons), ordinal));
     });
   }

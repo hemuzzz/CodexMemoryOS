@@ -115,8 +115,7 @@ export async function startCodexMemoryOsServer(
     contentVersions = new AssetContentVersionRepository(configuration.databasePath);
     knowledgeRepository = new KnowledgeRepository(configuration.databasePath);
     const capabilities = new WorkspaceCapabilityService(knowledgeRepository, configuration.workspaceConfigPath);
-    const policyPath = join(dirname(configuration.workspaceConfigPath), "recall-policy.json");
-    const projection = new KnowledgeProjection(knowledgeRepository, capabilities, policyPath, {
+    const projection = new KnowledgeProjection(knowledgeRepository, capabilities, {
       repositoryPath: configuration.assetRepositoryPath, workspaceConfigPath: configuration.workspaceConfigPath,
     });
     assetSearchService = new AssetSearchService({
@@ -125,7 +124,7 @@ export async function startCodexMemoryOsServer(
       workspaceConfigPath: configuration.workspaceConfigPath,
       refreshIndex: async () => await indexManager.synchronize(),
     });
-    const knowledgeService = new KnowledgeService(knowledgeRepository, capabilities, assetSearchService, policyPath, () => {
+    const knowledgeService = new KnowledgeService(knowledgeRepository, capabilities, assetSearchService, () => {
       if (indexManager.status().indexState !== "READY") throw new KnowledgeError("ASSET_INDEX_UNAVAILABLE");
     });
     const logger = new JsonFileLogger(configuration.logPath);

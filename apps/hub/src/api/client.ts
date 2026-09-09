@@ -5,7 +5,7 @@ import type {
   AssetListFilters,
   InboxResult,
   SystemStatus,
-  WorkspaceProjection, ScenarioProjection, RecallProjection, RecallDetail, UsageProjection,
+  WorkspaceProjection, RecallProjection, RecallDetail, UsageProjection,
 } from "./types.js";
 
 interface RestErrorDetail {
@@ -44,7 +44,6 @@ export class HubApiClient {
   }
 
   getWorkspaces(signal?: AbortSignal): Promise<WorkspaceProjection> { return this.#get("/api/workspaces", signal); }
-  getScenarios(signal?: AbortSignal): Promise<ScenarioProjection> { return this.#get("/api/scenarios", signal); }
   getRecalls(offset = 0, signal?: AbortSignal): Promise<{ items: RecallProjection[]; total: number }> { return this.#get(`/api/recalls?offset=${offset}&limit=50`, signal); }
   getRecall(id: string, signal?: AbortSignal): Promise<RecallDetail> { return this.#get(`/api/recalls/${encodeURIComponent(id)}`, signal); }
   getUsage(offset = 0, signal?: AbortSignal): Promise<{ items: UsageProjection[]; total: number }> { return this.#get(`/api/usage?offset=${offset}&limit=50`, signal); }

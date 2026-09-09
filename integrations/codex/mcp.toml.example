@@ -1,0 +1,4 @@
+# 待人工合并至 Codex config.toml；保留其他注册。
+[mcp_servers.codex_memory_os]
+url = "http://127.0.0.1:18888/mcp"
+required = false

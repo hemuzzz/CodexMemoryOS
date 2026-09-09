@@ -70,6 +70,8 @@ export interface AssetScanResult {
 }
 
 export interface AssetScanOptions {
+  /** Internal, validated configuration snapshot; never accepted from a model. */
+  workspaceConfigSnapshot?: WorkspaceConfig;
   repositoryPath: string;
   workspaceConfigPath: string;
 }
@@ -125,7 +127,7 @@ async function scanRepositoryDirectory(
   let workspaceConfig: WorkspaceConfig;
 
   try {
-    workspaceConfig = await loadWorkspaceConfig(resolve(options.workspaceConfigPath));
+    workspaceConfig = options.workspaceConfigSnapshot ?? await loadWorkspaceConfig(resolve(options.workspaceConfigPath));
   } catch (error) {
     return {
       assets: [],
@@ -232,7 +234,7 @@ export async function scanAssetFiles(options: AssetFileScanOptions): Promise<Ass
   let workspaceConfig: WorkspaceConfig;
 
   try {
-    workspaceConfig = await loadWorkspaceConfig(resolve(options.workspaceConfigPath));
+    workspaceConfig = options.workspaceConfigSnapshot ?? await loadWorkspaceConfig(resolve(options.workspaceConfigPath));
   } catch (error) {
     return {
       assets: [],

@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 
-import type { AssetFrontmatter, AssetScope, AssetType } from "./schema.js";
+import type { AssetFrontmatter, AssetScope, AssetType, WorkspaceConfig } from "./schema.js";
 import {
   loadWorkspaceConfig,
   scanAssetFiles,
@@ -15,7 +15,8 @@ const SNIPPET_LENGTH = 180;
 export type SearchStrategy = "FTS" | "LITERAL" | "HYBRID";
 
 export interface AssetSearchContext {
-  workspace: string | null;
+  authorizedWorkspaces: readonly string[];
+  workspaceConfigSnapshot?: WorkspaceConfig;
 }
 
 export interface AssetSearchQuery {
@@ -118,7 +119,7 @@ export interface NormalizedSearchQuery {
   terms: string[];
 }
 
-interface RankedSearchItem {
+export interface RankedSearchItem {
   assetId: string;
   bm25: number | null;
   fieldTier: number;
@@ -224,6 +225,14 @@ export class AssetSearchService {
     return rankedItems.sort(compareRankedItems).slice(0, limit).map(({ item }) => item);
   }
 
+  async rankedCandidates(context: AssetSearchContext, query: string): Promise<RankedSearchItem[]> {
+    this.#assertOpen();
+    const normalized = normalizeAssetSearchQuery(query);
+    const candidates = normalized.strategy === "LITERAL" ? this.#catalogCandidates(context)
+      : this.#ftsCandidates(context, buildFtsAndQuery(normalized.longTerms));
+    return (await this.#materializeCandidates(candidates, context, normalized)).sort(compareRankedItems);
+  }
+
   async read(query: AssetReadQuery): Promise<AssetReadResult> {
     this.#assertOpen();
     this.#diagnostics = [];
@@ -238,6 +247,7 @@ export class AssetSearchService {
     const scan = await scanAssetFiles({
       ...this.#scanOptions,
       relativePaths: [candidate.filePath],
+      ...(query.context.workspaceConfigSnapshot ? { workspaceConfigSnapshot: query.context.workspaceConfigSnapshot } : {}),
     });
     if (!scan.isComplete) {
       this.#recordIncompleteScan(scan.diagnostics);
@@ -380,7 +390,7 @@ export class AssetSearchService {
     query: NormalizedSearchQuery,
   ): Promise<RankedSearchItem[]> {
     const rankedItems: RankedSearchItem[] = [];
-    const current = await this.#scanCurrentCandidates(candidates, (asset) => isAccessible(asset, context));
+    const current = await this.#scanCurrentCandidates(candidates, (asset) => isAccessible(asset, context), context.workspaceConfigSnapshot);
 
     for (const { asset, candidate } of current) {
 
@@ -394,7 +404,7 @@ export class AssetSearchService {
           ? literalFieldTier(fields, query)
           : ftsFieldTier(fields, query.terms);
       const workspacePriority =
-        asset.frontmatter.scope === "WORKSPACE" && asset.frontmatter.workspace === context.workspace ? 1 : 0;
+        asset.frontmatter.scope === "WORKSPACE" && selectedWorkspaces(context).includes(asset.frontmatter.workspace) ? 1 : 0;
       const score = publicScore(fieldTier, workspacePriority, candidate.bm25);
       const { frontmatter } = asset;
       const item: AssetSearchItem = {
@@ -424,6 +434,7 @@ export class AssetSearchService {
   async #scanCurrentCandidates(
     candidates: readonly CatalogCandidate[],
     isAllowed: (asset: ScannedAsset) => boolean,
+    workspaceConfigSnapshot?: WorkspaceConfig,
   ): Promise<CurrentCatalogAsset[]> {
     if (candidates.length === 0) {
       return [];
@@ -431,6 +442,7 @@ export class AssetSearchService {
     const scan = await scanAssetFiles({
       ...this.#scanOptions,
       relativePaths: candidates.map(({ filePath }) => filePath),
+      ...(workspaceConfigSnapshot ? { workspaceConfigSnapshot } : {}),
     });
     if (!scan.isComplete) {
       this.#recordIncompleteScan(scan.diagnostics);
@@ -618,20 +630,11 @@ function eligibleCatalogSql(
 ): { parameters: unknown[]; sql: string } {
   const selection = catalogSelection(includeFts);
 
-  if (context.workspace === null) {
-    return {
-      parameters: [],
-      sql: `${selection} WHERE catalog.asset_scope = 'GLOBAL' ${includeFts ? "AND asset_fts MATCH ?" : ""} ${suffix}`,
-    };
-  }
-
+  const workspaces = selectedWorkspaces(context);
   return {
-    parameters: [context.workspace],
-    sql: `${selection}
-      WHERE (catalog.asset_scope = 'GLOBAL' OR (catalog.asset_scope = 'WORKSPACE' AND catalog.workspace = ?))
-      ${includeFts ? "AND asset_fts MATCH ?" : ""}
-      ${suffix}
-    `,
+    parameters: [...workspaces],
+    sql: `${selection} WHERE (catalog.asset_scope = 'GLOBAL'${workspaces.length ? ` OR (catalog.asset_scope = 'WORKSPACE' AND catalog.workspace IN (${workspaces.map(() => '?').join(',')}))` : ''})
+      ${includeFts ? "AND asset_fts MATCH ?" : ""} ${suffix}`,
   };
 }
 
@@ -707,9 +710,9 @@ function normalizeLibraryLimit(limit: number | undefined): number {
 function isAccessible(asset: ScannedAsset, context: AssetSearchContext): boolean {
   return (
     asset.frontmatter.scope === "GLOBAL" ||
-    (context.workspace !== null &&
+    (selectedWorkspaces(context).length > 0 &&
       asset.frontmatter.scope === "WORKSPACE" &&
-      asset.frontmatter.workspace === context.workspace)
+      selectedWorkspaces(context).includes(asset.frontmatter.workspace))
   );
 }
 
@@ -796,18 +799,20 @@ function ftsFieldTier(fields: ReturnType<typeof normalizedFields>, terms: readon
   return 1;
 }
 
-function compareRankedItems(left: RankedSearchItem, right: RankedSearchItem): number {
+export function compareRankedItems(left: RankedSearchItem, right: RankedSearchItem): number {
   return (
     right.fieldTier - left.fieldTier ||
     right.workspacePriority - left.workspacePriority ||
     compareBm25(left.bm25, right.bm25) ||
-    left.assetId.localeCompare(right.assetId)
+    (left.assetId < right.assetId ? -1 : left.assetId > right.assetId ? 1 : 0)
   );
 }
 
 function compareBm25(left: number | null, right: number | null): number {
+  if (!Number.isFinite(left)) left = null;
+  if (!Number.isFinite(right)) right = null;
   if (left === null || right === null) {
-    return 0;
+    return left === right ? 0 : left === null ? 1 : -1;
   }
   return left - right;
 }
@@ -888,7 +893,7 @@ function compareCurrentCatalogAssets(left: CurrentCatalogAsset, right: CurrentCa
 function compareLibraryScores(left: RankedLibraryItem, right: RankedLibraryItem): number {
   return right.item.score - left.item.score ||
     right.asset.modifiedAt.localeCompare(left.asset.modifiedAt) ||
-    left.assetId.localeCompare(right.assetId);
+    (left.assetId < right.assetId ? -1 : left.assetId > right.assetId ? 1 : 0);
 }
 
 function matchedSnippet(asset: ScannedAsset, terms: readonly string[]): string {
@@ -917,4 +922,8 @@ function unavailableError(diagnostics: readonly AssetDiagnostic[]): AssetSearchU
       ? "WORKSPACE_CONFIGURATION"
       : "ASSET_QUALIFICATION",
   );
+}
+
+function selectedWorkspaces(context: AssetSearchContext): readonly string[] {
+  return context.authorizedWorkspaces;
 }

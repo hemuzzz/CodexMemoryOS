@@ -33,6 +33,11 @@ export async function resolveTrustedWorkspace(cwd: string, workspaceConfigPath: 
     );
   }
 
+  return resolveWorkspaceFromConfig(cwd, config);
+}
+
+export function resolveWorkspaceFromConfig(cwd: string, config: WorkspaceConfig): string | null {
+  if (!isAbsolute(cwd) && !win32.isAbsolute(cwd)) throw new WorkspaceResolutionError("WORKSPACE_CWD_INVALID", "Absolute host directory required");
   const matches: WorkspaceMatch[] = [];
   for (const workspace of config.workspaces) {
     for (const configuredPath of workspace.paths) {

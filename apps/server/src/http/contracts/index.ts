@@ -7,7 +7,7 @@ import {
   assetTypeSchema,
   workspaceNameSchema,
 } from "../../asset/index.js";
-import { TASK_STATUSES } from "../../task/index.js";
+
 
 const idGenerator = new SnowflakeIdGenerator();
 
@@ -55,33 +55,13 @@ export const assetListQuerySchema = z
     }
   });
 
-export const taskLoadoutListQuerySchema = z
-  .object({
-    limit: limitParameterSchema.optional(),
-    status: z.enum(TASK_STATUSES).optional(),
-    workspace: workspaceParameterSchema.optional(),
-  })
-  .strict();
-
-export const usageListQuerySchema = z
-  .object({
-    assetId: assetIdSchema.optional(),
-    limit: limitParameterSchema.optional(),
-    taskId: z.string().refine((id) => idGenerator.validate(id, "tsk"), "taskId must be a valid tsk-prefixed ID").optional(),
-    workspace: workspaceParameterSchema.optional(),
-  })
-  .strict();
-
 export const assetPathSchema = z.object({ assetId: assetIdSchema }).strict();
-export const taskPathSchema = z
-  .object({
-    taskId: z.string().refine((id) => idGenerator.validate(id, "tsk"), "taskId must be a valid tsk-prefixed ID"),
-  })
-  .strict();
-
+export const factListQuerySchema = z.object({
+  limit: limitParameterSchema.optional(),
+  offset: z.string().regex(/^\d+$/u).transform(Number).pipe(z.number().int().safe().min(0)).optional(),
+  assetId: assetIdSchema.optional(),
+}).strict();
 export type AssetListQuery = z.infer<typeof assetListQuerySchema>;
-export type TaskLoadoutListQuery = z.infer<typeof taskLoadoutListQuerySchema>;
-export type UsageListQuery = z.infer<typeof usageListQuerySchema>;
 
 export interface RestErrorDetail {
   code: string;

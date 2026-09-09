@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { isAbsolute, win32 } from "node:path";
+import { isAbsolute, win32, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { getRequestListener } from "@hono/node-server";
@@ -17,10 +17,11 @@ import {
   HOOK_DATABASE_PATH_ENV,
   HOOK_WORKSPACE_CONFIG_PATH_ENV,
 } from "./hook/user-prompt-submit.js";
-import {
-  LoadoutAssetProjectionRepository,
-  TaskLoadoutApplicationService,
-} from "./loadout/index.js";
+import { KnowledgeRepository } from "./knowledge/repository.js";
+import { KnowledgeService } from "./knowledge/service.js";
+import { KnowledgeProjection } from "./knowledge/projection.js";
+import { KnowledgeError } from "./knowledge/model.js";
+import { WorkspaceCapabilityService } from "./workspace/capability.js";
 import { JsonFileLogger, logPathFromEnvironment } from "./logging.js";
 import {
   OverviewApplicationService,
@@ -28,8 +29,6 @@ import {
   SystemStatusApplicationService,
 } from "./http/index.js";
 import { createMcpHttpRequestHandler } from "./mcp/index.js";
-import { TaskApplicationService, TaskRepository } from "./task/index.js";
-import { UsageApplicationService, UsageRepository } from "./usage/index.js";
 
 export const SERVER_ASSET_REPOSITORY_PATH_ENV = "CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH";
 export const SERVER_PORT_ENV = "PORT";
@@ -107,44 +106,30 @@ export async function startCodexMemoryOsServer(
     workspaceConfigPath: configuration.workspaceConfigPath,
   });
   let contentVersions: AssetContentVersionRepository | undefined;
-  let taskRepository: TaskRepository | undefined;
-  let usageRepository: UsageRepository | undefined;
-  let assetProjection: LoadoutAssetProjectionRepository | undefined;
+  let knowledgeRepository: KnowledgeRepository | undefined;
   let assetSearchService: AssetSearchService | undefined;
   let server: Server | undefined;
 
   try {
     await indexManager.start();
     contentVersions = new AssetContentVersionRepository(configuration.databasePath);
-    taskRepository = new TaskRepository(configuration.databasePath);
-    const idGenerator = new SnowflakeIdGenerator();
-    const taskService = new TaskApplicationService(taskRepository, { idGenerator });
-    usageRepository = new UsageRepository(configuration.databasePath);
-    const usageService = new UsageApplicationService(usageRepository, { idGenerator });
-    assetProjection = new LoadoutAssetProjectionRepository(configuration.databasePath);
+    knowledgeRepository = new KnowledgeRepository(configuration.databasePath);
+    const capabilities = new WorkspaceCapabilityService(knowledgeRepository, configuration.workspaceConfigPath);
+    const policyPath = join(dirname(configuration.workspaceConfigPath), "recall-policy.json");
+    const projection = new KnowledgeProjection(knowledgeRepository, capabilities, policyPath, {
+      repositoryPath: configuration.assetRepositoryPath, workspaceConfigPath: configuration.workspaceConfigPath,
+    });
     assetSearchService = new AssetSearchService({
       databasePath: configuration.databasePath,
       repositoryPath: configuration.assetRepositoryPath,
       workspaceConfigPath: configuration.workspaceConfigPath,
       refreshIndex: async () => await indexManager.synchronize(),
     });
-    const loadoutService = new TaskLoadoutApplicationService({
-      assetProjection,
-      assetSearchService,
-      taskRepository,
-      taskService,
-      usageService,
+    const knowledgeService = new KnowledgeService(knowledgeRepository, capabilities, assetSearchService, policyPath, () => {
+      if (indexManager.status().indexState !== "READY") throw new KnowledgeError("ASSET_INDEX_UNAVAILABLE");
     });
     const logger = new JsonFileLogger(configuration.logPath);
-    const mcpRequest = createMcpHttpRequestHandler({
-      assetSearchService,
-      indexStatus: () => indexManager.status(),
-      loadoutService,
-      logger,
-      onInternalError: logInternalError,
-      taskService,
-      usageService,
-    });
+    const mcpRequest = createMcpHttpRequestHandler({ knowledgeService, logger, onInternalError: logInternalError });
     const inboxService = new InboxApplicationService(
       {
         repositoryPath: configuration.assetRepositoryPath,
@@ -154,8 +139,8 @@ export async function startCodexMemoryOsServer(
     );
     const assetService = new HubAssetApplicationService(
       assetSearchService,
-      loadoutService,
-      usageService,
+      projection,
+      knowledgeRepository,
       new AssetDiffService(assetSearchService, contentVersions),
     );
     const systemStatusService = new SystemStatusApplicationService({
@@ -171,11 +156,10 @@ export async function startCodexMemoryOsServer(
         assetService,
         inboxService,
         indexStatus: () => indexManager.status(),
-        loadoutService,
+        projection,
         onInternalError: logInternalError,
         systemStatusService,
-        overviewService: new OverviewApplicationService({ ...systemStatusService.dependencies, taskRepository, usageRepository }),
-        usageService,
+        overviewService: new OverviewApplicationService({ ...systemStatusService.dependencies, projection }),
       },
       { root: HUB_DIST_PATH },
     );
@@ -209,9 +193,7 @@ export async function startCodexMemoryOsServer(
         await closeServer(runningServer);
         contentVersions?.close();
         assetSearchService?.close();
-        assetProjection?.close();
-        usageRepository?.close();
-        taskRepository?.close();
+        knowledgeRepository?.close();
         await indexManager.close();
       },
     };
@@ -221,9 +203,7 @@ export async function startCodexMemoryOsServer(
     }
     contentVersions?.close();
     assetSearchService?.close();
-    assetProjection?.close();
-    usageRepository?.close();
-    taskRepository?.close();
+    knowledgeRepository?.close();
     await indexManager.close();
     throw error;
   }

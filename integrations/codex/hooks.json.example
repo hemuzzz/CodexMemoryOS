@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh '/Users/hemu/Desktop/github/CodexMemoryOS/knowledge-base/user-prompt-submit.sh'",
+            "timeout": 10,
+            "additionalContextLimit": 8000
+          }
+        ]
+      }
+    ]
+  }
+}

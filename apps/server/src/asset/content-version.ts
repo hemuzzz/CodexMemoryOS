@@ -14,7 +14,7 @@ export class ContentVersionIntegrityError extends Error {
   readonly code = "CONTENT_VERSION_INTEGRITY_ERROR";
 }
 
-const tableSql = `CREATE TABLE asset_content_version (
+export const CONTENT_VERSION_TABLE_SQL = `CREATE TABLE asset_content_version (
   asset_id TEXT NOT NULL,
   version_status TEXT NOT NULL CHECK (version_status IN ('CURRENT', 'PREVIOUS')),
   raw_content BLOB NOT NULL CHECK (typeof(raw_content) = 'blob'),
@@ -37,13 +37,13 @@ export class AssetContentVersionRepository {
         const table = this.database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='asset_content_version'").get();
         if (table === undefined) {
           if (installed !== 0) throw new ContentVersionIntegrityError("Content version table is missing");
-          this.database.exec(tableSql);
+          this.database.exec(CONTENT_VERSION_TABLE_SQL);
           this.database.pragma("user_version = 1");
         } else {
-          if (installed !== 1) throw new ContentVersionIntegrityError("Unsupported content storage version");
+          if (![1, 2, 3].includes(Number(installed))) throw new ContentVersionIntegrityError("Unsupported content storage version");
           // Validate the actual constraints, not just the column names.
           const sql = (table as { sql: string }).sql;
-          if (sql.replace(/\s+/gu, "").toLowerCase() !== tableSql.replace(/\s+/gu, "").toLowerCase()) {
+          if (sql.replace(/\s+/gu, "").toLowerCase() !== CONTENT_VERSION_TABLE_SQL.replace(/\s+/gu, "").toLowerCase()) {
             throw new ContentVersionIntegrityError("Content version schema is invalid");
           }
         }

@@ -34,30 +34,19 @@ export interface AssetLibraryItem {
   workspace: string | null;
 }
 
-export interface AssetUsageSummary {
-  readCount: number;
-  recallCount: number;
-  taskCount: number;
-  usedTaskCount: number;
-}
-
-export interface RecentAssetLoadout {
-  mode: "DIRECT" | "ON_DEMAND";
-  readCount: number;
-  reason: string;
-  recallCount: number;
-  requestSummary: string;
-  status: "RUNNING" | "COMPLETED" | "CANCELLED";
-  taskId: string;
-  updatedAt: string;
-  usedFlag: boolean;
-  workspace: string | null;
-}
+export interface AssetUsageSummary { readCount: number; recallCount: number; totalUsedCount: number }
+export type { RecallProjection, ItemProjection, UsageProjection } from "../../../server/src/knowledge/projection.js";
+import type { ItemProjection, UsageProjection, KnowledgeProjection } from "../../../server/src/knowledge/projection.js";
+export type WorkspaceProjection = Awaited<ReturnType<KnowledgeProjection["workspaces"]>>;
+export type ScenarioProjection = Awaited<ReturnType<KnowledgeProjection["scenarios"]>>;
+export type RecallDetail = NonNullable<ReturnType<KnowledgeProjection["recall"]>>;
 
 export interface AssetDetail extends AssetLibraryItem {
   frontmatter: AssetFrontmatter;
   rawMarkdown: string;
-  recentLoadouts: RecentAssetLoadout[];
+  recentRecalls: ItemProjection[];
+  recentUsage: UsageProjection[];
+  scenarioRelations: { scenarioId: string; name: string; enabled: boolean; mode: string }[];
   renderedMarkdown: string;
   usageSummary: AssetUsageSummary;
 }
@@ -109,83 +98,7 @@ export interface AssetListFilters {
   workspace?: string | null;
 }
 
-export type TaskStatus = "RUNNING" | "COMPLETED" | "CANCELLED";
-export type LoadoutMode = "DIRECT" | "ON_DEMAND";
-export type LoadoutReason =
-  | "MEMORY_STRONG_MATCH"
-  | "MEMORY_MATCH"
-  | "DOCUMENT_ON_DEMAND"
-  | "SKILL_ON_DEMAND"
-  | "DIRECT_BUDGET_DOWNGRADED";
 export type WatcherState = "NOT_STARTED" | "STARTING" | "RUNNING" | "DEGRADED" | "STOPPED";
-
-export interface TaskLoadoutAsset {
-  assetId: string;
-  estimatedCharacters: number;
-  mode: LoadoutMode;
-  reason: LoadoutReason;
-}
-
-export interface TaskLoadout {
-  assets: TaskLoadoutAsset[];
-  limits: {
-    maxAssets: number;
-    maxInjectedCharacters: number;
-  };
-  schemaVersion: number;
-}
-
-export interface TaskUsage {
-  assetId: string;
-  assetMissing: boolean;
-  createdAt: string;
-  readCount: number;
-  recallCount: number;
-  taskId: string;
-  updatedAt: string;
-  usageId: string;
-  usedFlag: boolean;
-}
-
-export interface TaskLoadoutDetail {
-  createdAt: string;
-  loadout: TaskLoadout;
-  request: string;
-  status: TaskStatus;
-  taskId: string;
-  updatedAt: string;
-  usages: TaskUsage[];
-  workspace: string | null;
-}
-
-export interface TaskLoadoutSummary {
-  assetCount: number;
-  createdAt: string;
-  estimatedCharacters: number;
-  request: string;
-  status: TaskStatus;
-  taskId: string;
-  updatedAt: string;
-  workspace: string | null;
-}
-
-export interface TaskLoadoutListFilters {
-  limit?: 20 | 50 | 100;
-  status?: TaskStatus;
-  workspace?: string | null;
-}
-
-export interface UsageListItem extends TaskUsage {
-  workspace: string | null;
-}
-
-export interface UsageListFilters {
-  assetId?: string;
-  limit?: 20 | 50 | 100;
-  taskId?: string;
-  workspace?: string | null;
-}
-
 export type SystemReadiness = "READY" | "DEGRADED" | "REBUILD_REQUIRED";
 
 export interface SystemDiagnostic {
@@ -223,16 +136,4 @@ export interface SystemStatus {
   };
 }
 
-export interface OverviewScope {
-  workspace: string | null;
-  assets: { MEMORY: number; DOCUMENT: number; SKILL: number };
-  inboxCount: number;
-  tasks: { RUNNING: number; COMPLETED: number; CANCELLED: number };
-  usage: { recallCount: number; readCount: number; usedPairCount: number; usedTaskCount: number };
-}
-
-export interface OverviewDto {
-  scopes: OverviewScope[];
-  generatedAt: string;
-  diagnosticCount: number;
-}
+export type { OverviewDto } from "../../../server/src/http/overview.js";

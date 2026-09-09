@@ -2,8 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import OverviewView from "./views/OverviewView.vue";
 import AssetsView from "./views/AssetsView.vue";
-import TaskLoadoutsView from "./views/TaskLoadoutsView.vue";
-import UsageView from "./views/UsageView.vue";
+import KnowledgeView from "./views/KnowledgeView.vue";
 import SystemStatusView from "./views/SystemStatusView.vue";
 import UiIcon from "./components/UiIcon.vue";
 import FilterMenu from "./components/FilterMenu.vue";
@@ -15,14 +14,16 @@ const navigation: { page: Page; label: string; icon: string }[] = [
   { page: "overview", label: "总览", icon: "overview" },
   { page: "library", label: "知识资产", icon: "library" },
   { page: "inbox", label: "收件箱", icon: "inbox" },
-  { page: "tasks", label: "任务", icon: "layers" },
+  { page: "workspaces", label: "工作区", icon: "layers" },
+  { page: "scenarios", label: "场景", icon: "layers" },
+  { page: "recalls", label: "召回记录", icon: "search" },
   { page: "usage", label: "使用记录", icon: "activity" },
   { page: "status", label: "系统状态", icon: "settings" },
 ];
 const view = computed(
   () =>
-    ({ overview: OverviewView, tasks: TaskLoadoutsView, usage: UsageView, status: SystemStatusView })[
-      route.value.page as "overview" | "tasks" | "usage" | "status"
+    ({ overview: OverviewView, workspaces: KnowledgeView, scenarios: KnowledgeView, recalls: KnowledgeView, usage: KnowledgeView, status: SystemStatusView })[
+      route.value.page as "overview" | "workspaces" | "scenarios" | "recalls" | "usage" | "status"
     ] ?? AssetsView,
 );
 function documentMainFocus() {

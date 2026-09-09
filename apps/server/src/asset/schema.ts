@@ -64,6 +64,10 @@ export const workspaceConfigSchema = z
         .object({
           name: workspaceNameSchema,
           paths: z.array(workspacePathSchema).min(1),
+          aliases: z.array(z.string().trim().min(1).max(40).regex(/^[^\u0000-\u001f\u007f]+$/u)).max(4).optional(),
+          description: z.string().trim().min(1).max(160).regex(/^[^\u0000-\u001f\u007f]+$/u).optional(),
+          // Omission preserves the existing host-cwd-only authorization policy.
+          knowledgeAccess: z.enum(["HOST_ONLY", "PREAUTHORIZED"]).optional(),
         })
         .strict(),
     ),

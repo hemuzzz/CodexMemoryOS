@@ -1,0 +1,78 @@
+{
+  "status": "2026-09-09 预授权配置及协议已安装，Server已构建启动READY；Hook信任/客户端重载及真实自动识别待验收",
+  "files": [
+    {
+      "target": "/Users/hemu/.codex/KNOWLEDGE.md",
+      "prepared": "integrations/codex/KNOWLEDGE.md",
+      "baselineSha256": "dee889314ef32b5c9db67f5066d408fe539ed40c92421f53577caa01ca25057e",
+      "preparedSha256": "10d89fc5fd2d67ce997bdfedb5b77d33715b52b32b8cebf9b8f48d56d73eccfe",
+      "installed": true,
+      "initialBaselineSha256": "57b629c0ae698236d689aaed43dc81c695f85c3a542dbe8059feabf4131d0440",
+      "installedSha256": "10d89fc5fd2d67ce997bdfedb5b77d33715b52b32b8cebf9b8f48d56d73eccfe"
+    },
+    {
+      "target": "/Users/hemu/.codex/skills/memory-recall/SKILL.md",
+      "prepared": "integrations/codex/skills/memory-recall/SKILL.md",
+      "baselineSha256": "5ac5cd74efa1e0c3bb6a79ab039ec7a28860b9daebaeb31e33d4e8ddaa5b956f",
+      "preparedSha256": "3f5303caad95e0cec637bb847c4282375c781ecd65071f99b1bfe99ee55bb31c",
+      "installed": true,
+      "initialBaselineSha256": "8a340a5f40bb03f03bb2ec48e96fbad426d3c0a6f1ece23399bef2b95aa07f83",
+      "installedSha256": "3f5303caad95e0cec637bb847c4282375c781ecd65071f99b1bfe99ee55bb31c"
+    },
+    {
+      "target": "/Users/hemu/.codex/skills/memory-usage-settlement/SKILL.md",
+      "prepared": "integrations/codex/skills/memory-usage-settlement/SKILL.md",
+      "baselineSha256": "d6fbb7ade7ef777e4f1275425604627242cdb9c07d04799113ea55a0cfdde6e2",
+      "preparedSha256": "d6fbb7ade7ef777e4f1275425604627242cdb9c07d04799113ea55a0cfdde6e2",
+      "installed": true,
+      "initialBaselineSha256": "23914143d9a43dc3e138fbe01a25a27114192db690aab7e49819c95737667924",
+      "installedSha256": "d6fbb7ade7ef777e4f1275425604627242cdb9c07d04799113ea55a0cfdde6e2"
+    },
+    {
+      "target": "/Users/hemu/.codex/skills/knowledge-capture/SKILL.md",
+      "prepared": "integrations/codex/skills/knowledge-capture/SKILL.md",
+      "baselineSha256": "2caa723600ae81fe2ff5c60c0cfbbd3c8d4f696678479c67bc409128c080e4db",
+      "preparedSha256": "2caa723600ae81fe2ff5c60c0cfbbd3c8d4f696678479c67bc409128c080e4db",
+      "installed": true,
+      "initialBaselineSha256": "fae42c0446e41cf120ceee5e14145f94c4d411087d3ebaa3a611f8e2301b3571",
+      "installedSha256": "2caa723600ae81fe2ff5c60c0cfbbd3c8d4f696678479c67bc409128c080e4db"
+    },
+    {
+      "target": "/Users/hemu/.codex/skills/memory-recall/agents/openai.yaml",
+      "prepared": "integrations/codex/skills/memory-recall/agents/openai.yaml",
+      "baselineSha256": "ea1b1ee8a987d2da2c75620d2271b1630876641ebb30d908370a6ca244d12c13",
+      "preparedSha256": "0bd6c4338a66afa8b36d9bd83f1086a78226e19f74f6b6075df0503bc2f00064",
+      "installed": true,
+      "installedSha256": "0bd6c4338a66afa8b36d9bd83f1086a78226e19f74f6b6075df0503bc2f00064"
+    },
+    {
+      "target": "/Users/hemu/Desktop/github/CodexMemoryOS/knowledge-base/config/workspaces.json",
+      "prepared": "integrations/codex/workspaces.preauthorized.json",
+      "baselineSha256": "565bc646a93cacfbc007eb54d8690aa3787344ff8fa32b686997964e6083d0a4",
+      "preparedSha256": "2a66ebac8cdcb6045038167c90bf59a4237fc4ee6e0ad1bf74a1404c0e44458d",
+      "installed": true,
+      "installedSha256": "2a66ebac8cdcb6045038167c90bf59a4237fc4ee6e0ad1bf74a1404c0e44458d"
+    }
+  ],
+  "manualMerges": [
+    {
+      "target": "/Users/hemu/.codex/AGENTS.md",
+      "prepared": "integrations/codex/AGENTS-knowledge-section.md",
+      "action": "仅替换工程知识节，保留其他规则",
+      "baselineSha256": "6c6887891c9a282a19cf49e682da2294564797ebbd5b800fd936019bbe2d83e3",
+      "preparedSha256": "2e9dae44e73ad6ff795fdb7922dcaf289634328641d823b21acf1fea53012368",
+      "installedSha256": "3e6903b8c0cfaf433fdc07798b49a9012ba78a118878ea6842c209ebf53c1f6e",
+      "installed": true
+    },
+    {
+      "target": "/Users/hemu/.codex/hooks.json",
+      "prepared": "integrations/codex/hooks.json.example",
+      "action": "仅更新知识Hook additionalContextLimit=8000，保留其他Hook",
+      "baselineSha256": "54a1100accf351aad4cf38a897ef1504f7d205ffd2fcb9b3254b2c430579ae94",
+      "preparedSha256": "6eb759afccb7a594397a84678528411fc1514711880bef68cab08935f0d3cb20",
+      "installedSha256": "42b75e8eec492b904135f8c7cf033c9337363e7c5c301f4329ae7ddc735a045a",
+      "installed": true
+    }
+  ],
+  "backupDirectory": "knowledge-base/backups/preauthorized-cutover-20260909-093644"
+}

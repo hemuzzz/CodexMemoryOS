@@ -12,7 +12,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "smoke:proxy:dev": "node test-support/dev-proxy-smoke.mjs",
     "test": "vitest run",
-    "typecheck": "vue-tsc --project tsconfig.json --noEmit"
+    "typecheck": "vue-tsc --project tsconfig.json --noEmit",
+    "typecheck:source": "vue-tsc --project tsconfig.source-check.json --noEmit"
   },
   "dependencies": {
     "@fontsource-variable/geist": "5.2.9",

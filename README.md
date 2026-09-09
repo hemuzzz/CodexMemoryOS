@@ -1,10 +1,10 @@
 # CodexMemoryOS
 
-CodexMemoryOS 是一个个人、本地、Codex 专用的知识运行时。Markdown 文件是 Asset 正文来源；`inbox/` 保存待人工确认候选，只有 `assets/` 下的文件才是正式 Asset。SQLite 保存可重建的 Catalog/FTS、Task/Usage/Loadout 运行数据，以及不可从当前 Markdown 重建的 CURRENT/PREVIOUS 内容快照；索引修复必须保留运行数据和内容快照。
+CodexMemoryOS 是一个个人、本地、Codex 专用的知识运行时。Markdown 文件是 Asset 正文来源；`inbox/` 保存待人工确认候选，只有 `assets/` 下的文件才是正式 Asset。SQLite 保存可重建的 Catalog/FTS、WorkspaceCapability 与 Recall/Read/Used 操作事实，以及不可从当前 Markdown 重建的 CURRENT/PREVIOUS 内容快照；索引修复必须保留运行数据和内容快照。
 
 Native Memories 提供客户端历史背景，本服务维护经人工确认、需要明确维护的工程知识；两者各自参与任务，不自动同步会话摘要、不扫描 Native 存储、不合并计数。始终适用的指导放在 AGENTS.md 或版本化文档。知识正文与模板统一见 [知识内容模型](工程约定/知识内容模型.md)。
 
-当前 MVP 提供 Workspace 隔离的 Search/Read、显式 Task Loadout、Usage、只读 Hub/REST、HTTP MCP 和单文件人工确认命令。它不依赖模型 API、MemoryProxy、Obsidian 或团队服务，也不会自动捕获、自动确认或批量确认知识。Hub 只读，不提供确认、编辑、移动或删除操作。
+当前 2.2 源码提供显式多 Workspace 能力选择、Recall/Read/Used、只读 Hub/REST、HTTP MCP 和单文件人工确认命令。它不依赖模型 API、MemoryProxy、Obsidian 或团队服务，也不会自动捕获、自动确认或批量确认知识。Hub 只读，不提供确认、编辑、移动或删除操作。
 
 ## 项目文档
 
@@ -69,15 +69,22 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm build
       "name": "example-project",
       "paths": [
         "/absolute/workspaces/example-project"
-      ]
+      ],
+      "aliases": ["示例项目"],
+      "description": "用于识别业务范围的简短项目说明",
+      "knowledgeAccess": "HOST_ONLY"
     }
   ]
 }
 ```
 
-本机迁移实例（2026-09-07）：`knowledge-base/config/workspaces.json` 已配置 CodexMemoryOS 和 xm-ai-job 两个 Workspace；本次确认入库分别为 6 份治理知识和 34 份业务知识。旧系统由用户确认已停用，旧源保留。正式清单、Hash 及验证边界见[旧知识迁移结果](migration/v4-generation-report.md)；xm-ai-job 的正向 MCP 使用需在该项目的真实 Task 中验证，不能借当前项目 Task 跨范围读取。
+本机迁移实例（2026-09-07）：`knowledge-base/config/workspaces.json` 已配置 CodexMemoryOS 和 xm-ai-job 两个 Workspace；本次确认入库分别为 6 份治理知识和 34 份业务知识。旧系统由用户确认已停用，旧源保留。正式清单、Hash 及验证边界见[旧知识迁移结果](migration/v4-generation-report.md)；这是旧版迁移记录；新版跨项目访问须取得该项目的可信能力，不借人工浏览接口绕过。
 
-Hook 按路径段边界执行最长路径匹配。没有匹配的 cwd 得到 `workspace=null`，只能访问 GLOBAL Asset；同等最长路径同时属于不同 Workspace 时拒绝继续。
+Hook 按路径段边界执行最长路径匹配，并合并用户明确配置 `knowledgeAccess: "PREAUTHORIZED"` 的项目。省略该字段或 `HOST_ONLY` 保留仅按宿主cwd签发的行为；仅有路径或别名不授权。PREAUTHORIZED允许该可信宿主的任务跨目录取得项目知识能力，启用前须得到用户授权；未匹配cwd且没有预授权时交付空能力集合，仅能显式访问GLOBAL。
+
+`aliases` 可选、最多4个，每个1–40字符；`description` 可选、1–160字符，均不含控制字符，仅帮助模型识别，不改变权限或授权Hash。别名有歧义时由模型澄清。每次Hook最多交付8个不同项目（cwd与预授权并集），超限报告 `WORKSPACE_CAPABILITY_LIMIT`，整批不签发。Hook配置的 `additionalContextLimit` 使用8000，容纳有界项目目录，Recall的5000字符预算保持不变。
+
+两项目配置 [workspaces.preauthorized.json](integrations/codex/workspaces.preauthorized.json) 包含“用工项目/用工系统”→`xm-ai-job`，已于2026-09-09在本机安装并完成人工验收。其他环境使用前仍须确认当地授权与配置。切换步骤与验收见[实施记录](项目文档/验证记录/04-设计2.2实现与人工切换.md#2026-09-09-人工验收与用户确认)。
 
 每个 Asset 是一个普通 Markdown 文件：
 
@@ -116,7 +123,7 @@ shasum -a 256 '/absolute/asset-repository/inbox/workspaces/example-project/memor
 
 | 环境变量 | 使用方 | 含义 |
 |---|---|---|
-| `CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH` | Server、Hook、`asset:confirm` | Asset Repository 绝对路径；Hook 投影非空 Loadout 时必须配置 |
+| `CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH` | Server、Hook、`asset:confirm` | Asset Repository 绝对路径；新版Hook仅需数据库与Workspace配置 |
 | `CODEX_MEMORY_OS_DATABASE_PATH` | Server、Hook、`asset:confirm` | SQLite 绝对路径 |
 | `CODEX_MEMORY_OS_WORKSPACES_PATH` | Server、Hook、`asset:confirm` | `workspaces.json` 绝对路径 |
 | `CODEX_MEMORY_OS_LOG_PATH` | Server、Hook | 日志文件；建议显式配置绝对路径 |
@@ -171,90 +178,37 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 \
   - `GET /api/assets`
   - `GET /api/assets/:assetId`
   - `GET /api/inbox`
-  - `GET /api/task-loadouts`
-  - `GET /api/task-loadouts/:taskId`
-  - `GET /api/usages`
+  - `GET /api/workspaces`
+  - `GET /api/scenarios`
+  - `GET /api/recalls`
+  - `GET /api/recalls/:recallId`
+  - `GET /api/usage`
   - `GET /api/system/status`
 
 未知 API、静态资源和页面返回 404，不回退到 Hub 首页。上述 REST 路径的 `POST`、`PUT`、`PATCH`、`DELETE` 返回 405。
 
 使用 `Ctrl-C`（SIGINT）停止前台进程；进程管理器也可发送 SIGTERM。Server 会关闭 HTTP 连接、Watcher 和 SQLite 连接。应先启动 Server，再启动依赖它的 Codex MCP Client；不要为此项目额外建设守护进程或服务管理平台。
 
-## Codex Hook
+## Codex Hook 与 MCP（2.2）
 
-构建后入口：
+新版源码取消业务Task、Session/Turn、Loadout依赖。Hook将真实cwd项目和明确预授权项目交付为持续能力，附项目名称、别名、说明；不解析Prompt、不自动执行Recall。Recall Skill自动识别项目业务、表/接口、故障与历史判断请求，先召回，再核对当前源码；每次只选择相关能力，不受会话cwd限制。2026-09-09已完成本机真实能力传递、别名选择、双项目召回与Used结算验收，用户确认本轮验收成功、无阻碍；模型路径参数不授予权限。
 
-```bash
-npx -y -p node@22.16.0 -p pnpm@11.1.3 \
-  pnpm --filter @codex-memory-os/server hook:user-prompt-submit
-```
+新环境切换前按 [2.2 实施与人工切换](项目文档/验证记录/04-设计2.2实现与人工切换.md) 执行离线迁移、构建、协议安装和人工验收；本机已完成切换，无需重复迁移。完整替换内容位于 `integrations/codex/`，不要只更新后端。
 
-该命令从 stdin 接收 Codex Hook JSON，并在 stdout 返回 `hookSpecificOutput.additionalContext`。它只做可信 cwd→Workspace、Task 创建/复用/显式 attach 和已保存 Loadout 的读取；首次 Hook 不自动 Resolve，后续 Turn 也不自动刷新 Loadout。Stop、Interrupt、SessionEnd 输入当前为无输出 no-op，不会推导 Task 终态。
-
-同一 Session 只在同 Workspace 中存在唯一 RUNNING Task 时复用。跨 Session 必须在提示中显式携带 `taskId: tsk...` 或 `taskId=tsk...`；Workspace 不一致、终态 Task 或同 Session 候选歧义时 fail closed。
-
-项目只提供以下 `hooks.json` 形状，不会创建或修改用户配置：
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "CODEX_MEMORY_OS_ASSET_REPOSITORY_PATH='/absolute/asset-repository' CODEX_MEMORY_OS_DATABASE_PATH='/absolute/runtime/codex-memory.sqlite' CODEX_MEMORY_OS_WORKSPACES_PATH='/absolute/config/workspaces.json' CODEX_MEMORY_OS_LOG_PATH='/absolute/logs/codex-memory-os.log' npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --dir '/absolute/CodexMemoryOS' --filter @codex-memory-os/server hook:user-prompt-submit",
-            "timeout": 10,
-            "additionalContextLimit": 3000
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Codex 会从用户级或受信任项目级配置层读取 Hook；新增或变更的非托管 Hook 需要用户自行检查并信任。参见 [OpenAI Codex Hooks 文档](https://developers.openai.com/codex/hooks)。
-
-知识 Hook 的预期配置、Task/Workspace 和依赖故障返回 exit 0、空 stdout，并向 stderr/本地日志留下诊断；非预期内部故障返回 exit 1 并记录错误。本机 CLI 已验证两者均不阻断 Prompt，知识读取仍拒绝非法资格。Hook 的 Task 连接和纯 Asset 读取连接采用 100ms SQLite busy timeout；这是每次数据库锁等待上限，不是整个文件扫描或 Hook 的总时限。
-
-当前内容超过 3000 Unicode 字符预算时，只对已通过 F01/F02/F03 资格检查的投影降级：DIRECT 改为按需引用，仍超预算则整项省略，极端情况下仅输出可用性提示。不会截断摘要、重写保存的 Loadout、重新 Resolve 或增加 Usage。
-
-## 显式结束 Task
-
-先配置确切的 `CODEX_MEMORY_OS_DATABASE_PATH`，使用现有 Task ID：
-
-```bash
-npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/server task:complete --task-id 'tsk123'
-npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/server task:cancel --task-id 'tsk123'
-```
-
-两者是互斥选择。只有 RUNNING 可以转换到 COMPLETED/CANCELLED；终态重复操作和跨终态转换按既有契约返回 `INVALID_TASK_TRANSITION`，不会重新写入。成功退出 0，失败退出 1，stderr JSON 保留 Task 错误码。命令不创建缺失数据库，不修改 Loadout/Usage/Binding，也不增加 MCP 工具或 Hub 写能力。
-
-## MCP
-
-Codex 的 Streamable HTTP 配置示例：
-
-```toml
-[mcp_servers.codex_memory_os]
-url = "http://127.0.0.1:3000/mcp"
-required = false
-```
-
-`required=false` 使本地知识服务初始化失败时不阻断普通 Codex 启动；参见 [OpenAI Codex MCP 文档](https://developers.openai.com/codex/mcp)。本项目不会修改用户全局 MCP 配置。当前 Desktop 中已经存在的任务不保证热加载新增 MCP 配置，配置后应新建任务验证。
-
-六个工具：
-
-| 工具 | 边界 |
+| 正常 MCP 工具 | 输入与行为 |
 |---|---|
-| `asset_search` | 按 `taskId` 取得可信 Workspace；返回实际 Asset，并 best-effort 写 Recall Usage |
-| `asset_read` | 按 `taskId + assetId` 读取当前 Markdown，并 best-effort 写 Read Usage |
-| `asset_mark_used` | 校验相同 Workspace 资格后显式、幂等写 Used Usage |
-| `task_loadout_resolve` | 仅显式调用；用 Task 初始 request/可信 Workspace 整体覆盖 RUNNING Task 的 Loadout |
-| `task_loadout_get` | 读取一个 Task、冻结 Loadout 和按 `taskId + assetId` 关联的 Usage |
-| `task_loadout_list` | 只读列出 Task Loadout 摘要 |
+| knowledge_recall | capabilityIds[]、query、scenarios可选；当前检索表达，资格去重后两桶4/4不足回流，最多8项、完整JSON最多5000 Unicode code points |
+| scenario_list | capabilityIds[]、offset/limit可选；纯读取适用的启用场景 |
+| asset_read | capabilityIds[] + recallItemId，或assetId + expectedContentHash可选；当前Hash契约，正文上限256000 UTF-8字节 |
+| asset_mark_used | capabilityIds[] + recallItemId或readRef；实际影响才使用，来源幂等，允许内容演进后的合法旧引用 |
 
-MCP 参数不能覆盖 Workspace，也不能提交任意路径。`task_loadout_resolve` 只用于已经取得人工确认的显式动作；Hook 不会自动调用它。当前没有 Asset 确认或移动 MCP 工具。
+capabilityIds必填且最多8个，[]只访问GLOBAL；Query最大256字符、不含控制字符；Scenario最多4个，单ID最大40字符。能力持久层只保存SHA-256摘要，无TTL；映射变化或明确撤销失效，不因时间、重启或无关配置变化失效。单个Workspace名称最多128字符、禁止控制字符。预授权关闭后，由预授权签发的额外能力失效；由真实cwd签发的能力仍按原映射校验。恢复同一预授权配置可能恢复其未撤销能力，永久失效仍须显式撤销摘要。
+
+Recall/Read事实写失败仍交付合格知识，usageRecorded=false、无本次稳定引用。Used失败明确报错。Usage按assetId跨内容累计，不按Hash分版本；旧引用Read遇内容更新仍返回CONTENT_CHANGED。正常MCP无asset_search和旧装配工具；Hub搜索保持纯检索。
+
+策略原件为 `CODEX_MEMORY_OS_WORKSPACES_PATH` 同目录的 `recall-policy.json`。缺失/损坏时关闭增强、保留基础召回；未知Workspace绑定单项隔离。示例 `integrations/codex/recall-policy.example.json` 的场景全部禁用，没有生成真实关系或启用策略。
+
+MCP仍使用本地回环 `/mcp` 和原有Host/Origin检查。注册示例见 `integrations/codex/mcp.toml.example`；注册本身不等于真实客户端已采用协议。
 
 ## 单文件人工确认
 
@@ -323,9 +277,9 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 \
 npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/server rebuild-index --offline
 ```
 
-`--offline` 是操作人确认所有写进程已停止；命令不会停止进程，也不证明不存在其他空闲写进程。命令先获得完整 Scanner Snapshot，再打开已存在数据库，在单个 EXCLUSIVE 事务里重建 Catalog/FTS 及其索引，保留 Task、Loadout、Binding、Usage 和其他非派生表。失败回滚并退出 1；不完整扫描、缺失/损坏数据库或锁冲突不会被伪装成空库成功。成功退出 0 后重新启动 Server，检查 `/api/system/status` READY 和实际 Search/Read。服务启动会等待 Watcher ready 后再完整复核一次，才对外报告 READY。
+`--offline` 是操作人确认所有写进程已停止；命令不会停止进程，也不证明不存在其他空闲写进程。命令先获得完整 Scanner Snapshot，再打开已存在数据库，在单个 EXCLUSIVE 事务里重建 Catalog/FTS 及其索引，保留能力、操作事实、内容双版和其他非派生表。失败回滚并退出 1；不完整扫描、缺失/损坏数据库或锁冲突不会被伪装成空库成功。成功退出 0 后重新启动 Server，检查 `/api/system/status` READY 和实际 Search/Read。服务启动会等待 Watcher ready 后再完整复核一次，才对外报告 READY。
 
-**数据库整体丢失或文件损坏是另一种恢复边界。** 本命令不能恢复 Task/Usage，也不自动新建整库、覆盖备份或执行重置。只能在另行明确接受运行历史损失后安排整库恢复，不能以这种方式代替派生索引修复。
+**数据库整体丢失或文件损坏是另一种恢复边界。** 本命令不能恢复能力/操作事实，也不自动新建整库、覆盖备份或执行重置。只能在另行明确接受运行历史损失后安排整库恢复，不能以这种方式代替派生索引修复。
 
 ### HTTP、MCP、Vite 和确认命令
 
@@ -340,14 +294,7 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/server rebu
 
 ## 已知边界
 
-- 只验证目标 macOS ARM 本机环境；网络文件系统、其他操作系统和其他架构未验证。
-- ID 保留 `ast/tsk/usg` 加十进制数字的字符串契约，兼容旧 ID；新 ID 在 Snowflake 后组合 128 位随机量，避免多个独立进程固定 node=0、同毫秒同序列的确定性冲突。长度增加，不应转为 JavaScript Number；随机碰撞概率极低但不构成绝对唯一证明，SQLite 唯一约束继续保留。
-- Loadout 的 `200/300` 分数阈值、`3000` Unicode 字符和最多 `8` 个 Asset 只完成确定性 fixture 消融，不是长期质量结论。
-- Task 终态不从 Stop、Interrupt 或 SessionEnd 自动推导。
-- 不自动捕获、确认、批量移动或长期评估知识。
-- Hub 与七个 REST API 只读；MCP 只有 Usage 和显式 Loadout Resolve 的受限写入。
-- M00～M05 旧知识人工整理尚未开始；只验证了合成 M03/M04 接入契约，没有读取或迁移正式旧知识。
-- N13 的 `scenarioAssumptions.estimatedExplicitReads` 是场景假设，不是实际 Read 次数测量，也不证明质量提升。
-- 本轮真实 Codex CLI 使用隔离配置和脚本化本地 Responses 端点验证 Hook/MCP；没有调用真实模型或验收 Desktop 人工信任/多窗口。
-- 没有正式长期数据验收，也没有修改用户全局 Codex/MCP/Hook 配置。
-- N12 在源删除后若遭遇命令外部的目标破坏，需要人工核对，不提供恢复平台或分布式锁。
+- 2026-09-09本机2.2及自动项目识别修订已获用户验收确认，无本轮阻碍；实际检查与范围裁定见实施记录，不将人工验收等同于全仓自动测试通过。
+- 旧协议自动测试与smoke仍保留历史用例，尚未适配新契约；不能作为新版验收依据。现有typecheck包含这些旧测试，源码检查请用typecheck:source，未修改原测试命令或削弱断言。
+- 本地协议、数据库与服务已切换，真实宿主能力交付和Skill选择已验证。Scenario保持未启用，净收益评估不纳入本轮放行条件。
+- 手动迁移与启动步骤、数据保留边界及验收清单见 [2.2 实施与人工切换](项目文档/验证记录/04-设计2.2实现与人工切换.md)。

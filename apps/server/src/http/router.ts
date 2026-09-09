@@ -11,22 +11,12 @@ import {
   InboxUnavailableError,
   type AssetIndexStatus,
 } from "../asset/index.js";
-import {
-  LoadoutJsonError,
-  TaskLoadoutApplicationService,
-} from "../loadout/index.js";
-import { TaskInputError, TaskNotFoundError } from "../task/index.js";
-import {
-  UsageApplicationService,
-  UsageInputError,
-  UsageSchemaError,
-} from "../usage/index.js";
+import type { KnowledgeProjection } from "../knowledge/projection.js";
+import { KnowledgeError } from "../knowledge/model.js";
 import {
   assetListQuerySchema,
   assetPathSchema,
-  taskLoadoutListQuerySchema,
-  taskPathSchema,
-  usageListQuerySchema,
+  factListQuerySchema,
   type RestErrorDetail,
   type RestErrorResponse,
   type RestSuccessResponse,
@@ -38,28 +28,15 @@ import {
   SystemStatusApplicationService,
 } from "./service.js";
 
-const KNOWN_API_PATHS = [
-  /^\/api\/overview$/u,
-  /^\/api\/assets$/u,
-  /^\/api\/assets\/[^/]+\/diff$/u,
-  /^\/api\/assets\/[^/]+$/u,
-  /^\/api\/inbox$/u,
-  /^\/api\/task-loadouts$/u,
-  /^\/api\/task-loadouts\/[^/]+$/u,
-  /^\/api\/usages$/u,
-  /^\/api\/system\/status$/u,
-];
-
 export interface RestApiDependencies {
   allowedAuthority: string;
   overviewService: Pick<OverviewApplicationService, "get">;
   assetService: HubAssetApplicationService;
   inboxService: Pick<InboxApplicationService, "scan">;
   indexStatus: () => AssetIndexStatus;
-  loadoutService: Pick<TaskLoadoutApplicationService, "get" | "list">;
+  projection: KnowledgeProjection;
   onInternalError?: (error: unknown) => void;
   systemStatusService: Pick<SystemStatusApplicationService, "get">;
-  usageService: Pick<UsageApplicationService, "list">;
 }
 
 export function createRestApiApp(dependencies: RestApiDependencies): Hono {
@@ -73,7 +50,7 @@ export function createRestApiApp(dependencies: RestApiDependencies): Hono {
         retryable: false,
       });
     }
-    if (context.req.method !== "GET" && isKnownApiPath(context.req.path)) {
+    if (context.req.method !== "GET") {
       context.header("Allow", "GET");
       return failure(context, 405, {
         code: "METHOD_NOT_ALLOWED",
@@ -127,43 +104,29 @@ export function createRestApiApp(dependencies: RestApiDependencies): Hono {
     return success(context, await dependencies.inboxService.scan());
   });
 
-  app.get("/api/task-loadouts", (context) => {
-    const query = parseStrictQuery(
-      context,
-      ["workspace", "status", "limit"],
-      taskLoadoutListQuerySchema,
-    );
-    const items = dependencies.loadoutService.list({
-      ...(query.status === undefined ? {} : { status: query.status }),
-      ...(query.limit === undefined ? {} : { limit: query.limit }),
-      ...(Object.prototype.hasOwnProperty.call(query, "workspace")
-        ? { workspace: query.workspace ?? null }
-        : {}),
-    });
-    return success(context, { items });
-  });
-
-  app.get("/api/task-loadouts/:taskId", (context) => {
+  app.get("/api/workspaces", async (context) => {
     parseStrictQuery(context, [], z.object({}).strict());
-    const path = parsePath(taskPathSchema, { taskId: context.req.param("taskId") }, "TASK_ID_INVALID");
-    return success(context, { taskLoadout: dependencies.loadoutService.get(path.taskId) });
+    return success(context, await dependencies.projection.workspaces());
   });
-
-  app.get("/api/usages", (context) => {
-    const query = parseStrictQuery(
-      context,
-      ["taskId", "assetId", "workspace", "limit"],
-      usageListQuerySchema,
-    );
-    const items = dependencies.usageService.list({
-      ...(query.taskId === undefined ? {} : { taskId: query.taskId }),
-      ...(query.assetId === undefined ? {} : { assetId: query.assetId }),
-      ...(query.limit === undefined ? {} : { limit: query.limit }),
-      ...(Object.prototype.hasOwnProperty.call(query, "workspace")
-        ? { workspace: query.workspace ?? null }
-        : {}),
-    });
-    return success(context, { items });
+  app.get("/api/scenarios", async (context) => {
+    parseStrictQuery(context, [], z.object({}).strict());
+    return success(context, await dependencies.projection.scenarios());
+  });
+  app.get("/api/recalls", (context) => {
+    const query = parseStrictQuery(context, ["offset", "limit"], factListQuerySchema);
+    return success(context, dependencies.projection.recalls(query.offset, query.limit));
+  });
+  app.get("/api/recalls/:recallId", (context) => {
+    parseStrictQuery(context, [], z.object({}).strict());
+    const id = context.req.param("recallId");
+    if (!/^usg[0-9]+$/u.test(id)) throw invalidRequest("INPUT_INVALID", "Invalid reference");
+    const recall = dependencies.projection.recall(id);
+    if (!recall) throw new RestError(404, { code: "SOURCE_NOT_FOUND", message: "Recall not found", retryable: false });
+    return success(context, recall);
+  });
+  app.get("/api/usage", (context) => {
+    const query = parseStrictQuery(context, ["offset", "limit", "assetId"], factListQuerySchema);
+    return success(context, dependencies.projection.usage(query.offset, query.limit, query.assetId));
   });
 
   app.get("/api/system/status", async (context) => {
@@ -251,10 +214,6 @@ function requestIsAllowed(context: Context, allowedAuthority: string): boolean {
   return origin === undefined || origin === `http://${allowedAuthority}`;
 }
 
-function isKnownApiPath(path: string): boolean {
-  return KNOWN_API_PATHS.some((pattern) => pattern.test(path));
-}
-
 function mapRestError(error: unknown, onInternalError: ((error: unknown) => void) | undefined): RestError {
   if (error instanceof RestError) {
     return error;
@@ -297,21 +256,7 @@ function mapRestError(error: unknown, onInternalError: ((error: unknown) => void
       retryable: true,
     });
   }
-  if (error instanceof TaskInputError) {
-    return new RestError(400, { code: "TASK_ID_INVALID", message: "taskId must be a valid tsk-prefixed ID", retryable: false });
-  }
-  if (error instanceof TaskNotFoundError) {
-    return new RestError(404, { code: "TASK_NOT_FOUND", message: "Task does not exist", retryable: false });
-  }
-  if (error instanceof UsageInputError) {
-    return new RestError(400, { code: "USAGE_INPUT_INVALID", message: error.message, retryable: false });
-  }
-  if (error instanceof LoadoutJsonError) {
-    return new RestError(500, { code: "LOADOUT_JSON_INVALID", message: "Stored Loadout JSON is invalid", retryable: false });
-  }
-  if (error instanceof UsageSchemaError) {
-    return new RestError(500, { code: "USAGE_SCHEMA_INVALID", message: "Usage storage schema is invalid", retryable: false });
-  }
+  if (error instanceof KnowledgeError) return new RestError(503, { code: error.code, message: error.code, retryable: true });
   onInternalError?.(error);
   return new RestError(500, {
     code: "INTERNAL_ERROR",

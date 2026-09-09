@@ -7,8 +7,6 @@ export interface PresentedError {
 
 export type ReadViewContext =
   | "SYSTEM_STATUS"
-  | "TASK_DETAIL"
-  | "TASK_LIST"
   | "USAGE_LIST";
 
 export function asHubApiError(error: unknown): HubApiError {
@@ -36,19 +34,13 @@ export function presentReadError(
       detail: "服务返回了无法识别的响应，请检查服务后重试。",
     };
   }
-  if (context === "TASK_DETAIL" && error.status === 404) {
-    return {
-      title: "任务已不存在",
-      detail: "刷新任务列表以获取当前内容。",
-    };
-  }
   if (error.status === 503) {
     const subject =
       context === "SYSTEM_STATUS"
         ? "系统状态"
         : context === "USAGE_LIST"
           ? "使用记录"
-          : "任务";
+          : "知识";
     return {
       title: `${subject}暂时不可用`,
       detail: "本地服务尚未就绪，请恢复后重试。",
@@ -75,7 +67,7 @@ export function formatDate(value: string): string {
 }
 
 export function displayWorkspace(workspace: string | null): string {
-  return workspace ?? "未绑定工作区";
+  return workspace ?? "GLOBAL";
 }
 
 const valueLabels: Record<string, string> = {

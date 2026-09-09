@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "kinds": [{ "id": "engineering", "name": "工程" }],
+  "workspaceKinds": [],
+  "scenarios": [{ "id": "review", "name": "工程审查", "description": "待固定样本净收益验收的场景定义", "enabled": false, "applicableKinds": ["engineering"], "assets": [] }]
+}

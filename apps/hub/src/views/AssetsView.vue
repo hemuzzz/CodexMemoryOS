@@ -847,10 +847,6 @@ function presentError(
               </div>
               <dl class="usage-strip">
                 <div>
-                  <dt>关联任务</dt>
-                  <dd>{{ assetDetail.usageSummary.taskCount }}</dd>
-                </div>
-                <div>
                   <dt>召回</dt>
                   <dd>{{ assetDetail.usageSummary.recallCount }}</dd>
                 </div>
@@ -859,69 +855,26 @@ function presentError(
                   <dd>{{ assetDetail.usageSummary.readCount }}</dd>
                 </div>
                 <div>
-                  <dt>实际使用任务</dt>
-                  <dd>{{ assetDetail.usageSummary.usedTaskCount }}</dd>
+                  <dt>累计使用</dt>
+                  <dd>{{ assetDetail.usageSummary.totalUsedCount }}</dd>
                 </div>
               </dl>
             </section>
-            <section class="loadout-section" aria-labelledby="loadout-heading">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">最近关联</p>
-                  <h3 id="loadout-heading">任务与装载</h3>
-                </div>
-                <span>{{ assetDetail.recentLoadouts.length }} 条</span>
+            <section class="usage-section" aria-label="最近知识事实">
+              <h3>场景关系</h3>
+              <p v-if="!assetDetail.scenarioRelations.length">无场景关联。</p>
+              <p v-for="relation in assetDetail.scenarioRelations" :key="relation.scenarioId">{{ relation.name }} · {{ relation.mode }} · {{ relation.enabled ? "已启用" : "禁用" }}</p>
+              <h3>最近召回与使用</h3>
+              <p>只统计已持久事实；内容更新不重置该知识的累计使用。</p>
+              <p v-if="!assetDetail.recentRecalls.length && !assetDetail.recentUsage.length">暂无已记录事实。</p>
+              <div v-for="item in assetDetail.recentRecalls" :key="item.recallItemId" class="metadata-grid">
+                <code>{{ item.recallItemId }}</code><span>{{ item.bucket }} · {{ item.deliveredMode }}</span>
+                <span>{{ item.selectionReasons.join('、') }}</span><span>读取 {{ item.readCount }} · 使用 {{ item.totalUsedCount }}</span>
+                <span v-if="item.contentHash !== assetDetail.contentHash">内容已变化（仅显示交付证据）</span>
               </div>
-              <div
-                v-if="assetDetail.recentLoadouts.length === 0"
-                class="state-panel compact"
-              >
-                <p>该资产尚未出现在已记录的任务装载中。</p>
-              </div>
-              <div v-else class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>任务</th>
-                      <th>任务内容</th>
-                      <th>状态</th>
-                      <th>装载原因</th>
-                      <th>使用记录</th>
-                      <th>更新时间</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr
-                      v-for="loadout in assetDetail.recentLoadouts"
-                      :key="loadout.taskId"
-                    >
-                      <td>
-                        <code>{{ loadout.taskId }}</code
-                        ><small>{{ loadout.workspace ?? "全局知识" }}</small>
-                      </td>
-                      <td>{{ loadout.requestSummary }}</td>
-                      <td>
-                        <span class="status-label">{{
-                          displayValue(loadout.status)
-                        }}</span
-                        ><small>{{ displayValue(loadout.mode) }}</small>
-                      </td>
-                      <td>
-                        <code>{{ loadout.reason }}</code>
-                      </td>
-                      <td>
-                        召回 {{ loadout.recallCount }} · 读取
-                        {{ loadout.readCount }} ·
-                        {{ loadout.usedFlag ? "已使用" : "未使用" }}
-                      </td>
-                      <td>
-                        <time :datetime="loadout.updatedAt">{{
-                          formatDate(loadout.updatedAt)
-                        }}</time>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+              <div v-for="item in assetDetail.recentUsage" :key="item.id" class="metadata-grid">
+                <span>{{ item.kind === 'READ' ? '读取' : '使用' }}</span><time>{{ formatDate(item.occurredAt) }}</time>
+                <code>{{ item.id }}</code><span>{{ item.assetWorkspace ?? 'GLOBAL' }}</span>
               </div>
             </section>
           </details>

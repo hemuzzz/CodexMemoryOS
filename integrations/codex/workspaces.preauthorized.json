@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "workspaces": [
+    {
+      "name": "CodexMemoryOS",
+      "paths": ["/Users/hemu/Desktop/github/CodexMemoryOS"],
+      "aliases": ["知识库项目"],
+      "description": "本地工程知识运行时，Markdown Asset、知识召回、使用统计与只读Hub。",
+      "knowledgeAccess": "PREAUTHORIZED"
+    },
+    {
+      "name": "xm-ai-job",
+      "paths": ["/Users/hemu/Desktop/workSpace/xm-ai-job"],
+      "aliases": ["用工项目", "用工系统"],
+      "description": "用工业务系统，企业端、招聘任务、企业充值、资金单与结算。",
+      "knowledgeAccess": "PREAUTHORIZED"
+    }
+  ]
+}

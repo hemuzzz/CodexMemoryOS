@@ -13,14 +13,8 @@ import {
   type AssetScanOptions,
   type IndexDiagnostic,
 } from "../asset/index.js";
-import {
-  TaskLoadoutApplicationService,
-  type RecentAssetLoadoutDto,
-} from "../loadout/index.js";
-import {
-  UsageApplicationService,
-  type AssetUsageSummary,
-} from "../usage/index.js";
+import type { KnowledgeRepository } from "../knowledge/repository.js";
+import type { KnowledgeProjection, ItemProjection, UsageProjection } from "../knowledge/projection.js";
 
 const SERVICE_NAME = "codex-memory-os";
 const SERVICE_VERSION = "0.0.0";
@@ -31,14 +25,16 @@ export interface AssetDetailDto {
   frontmatter: Awaited<ReturnType<AssetSearchService["readLibrary"]>>["frontmatter"];
   modifiedAt: string;
   rawMarkdown: string;
-  recentLoadouts: RecentAssetLoadoutDto[];
+  recentRecalls: ItemProjection[];
+  recentUsage: UsageProjection[];
+  scenarioRelations: { scenarioId: string; name: string; enabled: boolean; mode: string }[];
   relativePath: string;
   renderedMarkdown: string;
   scope: Awaited<ReturnType<AssetSearchService["readLibrary"]>>["frontmatter"]["scope"];
   summary: string;
   title: string;
   type: Awaited<ReturnType<AssetSearchService["readLibrary"]>>["frontmatter"]["type"];
-  usageSummary: AssetUsageSummary;
+  usageSummary: ReturnType<KnowledgeRepository["summarizeByAsset"]>;
   workspace: string | null;
 }
 
@@ -47,8 +43,8 @@ export class HubAssetApplicationService {
 
   constructor(
     readonly assetSearchService: Pick<AssetSearchService, "listLibrary" | "readLibrary">,
-    readonly loadoutService: Pick<TaskLoadoutApplicationService, "recentByAsset">,
-    readonly usageService: Pick<UsageApplicationService, "summarizeByAsset">,
+    readonly projection: KnowledgeProjection,
+    readonly usageService: Pick<KnowledgeRepository, "summarizeByAsset">,
     readonly diffService?: AssetDiffService,
   ) {}
 
@@ -69,7 +65,9 @@ export class HubAssetApplicationService {
       frontmatter: asset.frontmatter,
       modifiedAt: asset.modifiedAt,
       rawMarkdown: asset.markdown,
-      recentLoadouts: this.loadoutService.recentByAsset(assetId),
+      recentRecalls: this.projection.items("i.asset_id=?", assetId),
+      recentUsage: this.projection.usage(0, 20, assetId).items,
+      scenarioRelations: (await this.projection.scenarios()).scenarios.flatMap((scenario) => scenario.assets.filter((relation) => relation.assetId === assetId).map((relation) => ({ scenarioId: scenario.id, name: scenario.name, enabled: scenario.enabled, mode: relation.mode }))),
       relativePath: asset.relativePath,
       renderedMarkdown: this.#renderer.render(asset.bodyMarkdown),
       scope: asset.frontmatter.scope,

@@ -20,9 +20,11 @@
     "test": "tsx --test --test-concurrency=1 test/*.test.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "rebuild-index": "node dist/maintenance-cli.js rebuild-index",
-    "task:complete": "node dist/maintenance-cli.js complete",
-    "task:cancel": "node dist/maintenance-cli.js cancel",
-    "smoke:codex:build": "node test-support/codex-client-build-smoke.mjs"
+    "smoke:codex:build": "node test-support/codex-client-build-smoke.mjs",
+    "knowledge:migrate": "node dist/maintenance-cli.js migrate-knowledge",
+    "runtime:retire": "node dist/maintenance-cli.js retire-old-runtime",
+    "capability:revoke": "node dist/maintenance-cli.js revoke-capability",
+    "typecheck:source": "tsc --project tsconfig.source-check.json --noEmit"
   },
   "dependencies": {
     "@codex-memory-os/id-generator": "workspace:*",

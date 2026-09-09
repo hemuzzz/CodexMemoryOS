@@ -5,11 +5,7 @@ import type {
   AssetListFilters,
   InboxResult,
   SystemStatus,
-  TaskLoadoutDetail,
-  TaskLoadoutListFilters,
-  TaskLoadoutSummary,
-  UsageListFilters,
-  UsageListItem,
+  WorkspaceProjection, ScenarioProjection, RecallProjection, RecallDetail, UsageProjection,
 } from "./types.js";
 
 interface RestErrorDetail {
@@ -47,20 +43,11 @@ export class HubApiClient {
     return this.#get("/api/inbox", signal);
   }
 
-  listTaskLoadouts(
-    filters: TaskLoadoutListFilters,
-    signal?: AbortSignal,
-  ): Promise<{ items: TaskLoadoutSummary[] }> {
-    return this.#get(buildTaskLoadoutListPath(filters), signal);
-  }
-
-  getTaskLoadout(taskId: string, signal?: AbortSignal): Promise<{ taskLoadout: TaskLoadoutDetail }> {
-    return this.#get(`/api/task-loadouts/${encodeURIComponent(taskId)}`, signal);
-  }
-
-  listUsages(filters: UsageListFilters, signal?: AbortSignal): Promise<{ items: UsageListItem[] }> {
-    return this.#get(buildUsageListPath(filters), signal);
-  }
+  getWorkspaces(signal?: AbortSignal): Promise<WorkspaceProjection> { return this.#get("/api/workspaces", signal); }
+  getScenarios(signal?: AbortSignal): Promise<ScenarioProjection> { return this.#get("/api/scenarios", signal); }
+  getRecalls(offset = 0, signal?: AbortSignal): Promise<{ items: RecallProjection[]; total: number }> { return this.#get(`/api/recalls?offset=${offset}&limit=50`, signal); }
+  getRecall(id: string, signal?: AbortSignal): Promise<RecallDetail> { return this.#get(`/api/recalls/${encodeURIComponent(id)}`, signal); }
+  getUsage(offset = 0, signal?: AbortSignal): Promise<{ items: UsageProjection[]; total: number }> { return this.#get(`/api/usage?offset=${offset}&limit=50`, signal); }
 
   getOverview(signal?: AbortSignal): Promise<OverviewDto> {
     return this.#get("/api/overview", signal);
@@ -144,23 +131,6 @@ export function buildAssetListPath(filters: AssetListFilters): string {
   }
   const query = parameters.toString();
   return query.length === 0 ? "/api/assets" : `/api/assets?${query}`;
-}
-
-export function buildTaskLoadoutListPath(filters: TaskLoadoutListFilters): string {
-  const parameters = new URLSearchParams();
-  appendWorkspace(parameters, filters.workspace);
-  appendText(parameters, "status", filters.status);
-  appendLimit(parameters, filters.limit);
-  return withQuery("/api/task-loadouts", parameters);
-}
-
-export function buildUsageListPath(filters: UsageListFilters): string {
-  const parameters = new URLSearchParams();
-  appendText(parameters, "taskId", filters.taskId);
-  appendText(parameters, "assetId", filters.assetId);
-  appendWorkspace(parameters, filters.workspace);
-  appendLimit(parameters, filters.limit);
-  return withQuery("/api/usages", parameters);
 }
 
 export function isAbortError(error: unknown): boolean {

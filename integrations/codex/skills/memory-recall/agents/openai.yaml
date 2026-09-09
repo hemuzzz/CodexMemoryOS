@@ -1,0 +1,7 @@
+interface:
+  display_name: "工程知识 Recall"
+  short_description: "自动识别项目与别名，召回业务、表、接口和历史判断"
+  default_prompt: "Use $memory-recall to identify the authorized project from the request, recall relevant knowledge, and verify it against current evidence."
+
+policy:
+  allow_implicit_invocation: true

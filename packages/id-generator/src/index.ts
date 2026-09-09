@@ -35,3 +35,8 @@ export class SnowflakeIdGenerator implements IdGenerator {
     return expectedPrefix === undefined || id.startsWith(expectedPrefix);
   }
 }
+
+/** Opaque bearer value; persist only its digest. */
+export function generateWorkspaceCapability(): string {
+  return `cap_${randomBytes(32).toString("base64url")}`;
+}

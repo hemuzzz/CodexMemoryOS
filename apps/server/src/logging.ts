@@ -6,8 +6,6 @@ export const LOG_PATH_ENV = "CODEX_MEMORY_OS_LOG_PATH";
 
 export type StructuredLogEvent =
   | "HOOK_CONTEXT_UNAVAILABLE"
-  | "LOADOUT_RENDER_FAILED"
-  | "LOADOUT_RESOLVE_FAILED"
   | "USAGE_READ_WRITE_FAILED"
   | "USAGE_RECALL_WRITE_FAILED"
   | "USAGE_USED_WRITE_FAILED";
@@ -19,7 +17,6 @@ export interface StructuredErrorLogInput {
   errorCode: string;
   event: StructuredLogEvent;
   operation: string;
-  taskId?: string;
 }
 
 export interface StructuredLogger {
@@ -39,7 +36,6 @@ export class JsonFileLogger implements StructuredLogger {
       level: "ERROR",
       event: input.event,
       operation: input.operation,
-      taskId: input.taskId,
       ...(input.assetId === undefined ? {} : { assetId: input.assetId }),
       ...(input.assetIds === undefined ? {} : { assetIds: [...input.assetIds] }),
       errorCode: input.errorCode,

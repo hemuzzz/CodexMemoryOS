@@ -1,23 +1,23 @@
 {
-  "status": "2026-09-09 多表达召回2.3源码与协议已准备；3个协议文件待同批安装，schema-4迁移/构建切换/客户端重载及真实验收未执行。保留已安装的触发与治理修订。",
+  "status": "2026-09-09 多表达召回2.3已完成本地构建、schema-3到4迁移与服务重启；3份已安装协议Hash与准备稿一致。真实HTTP MCP三表达召回返回5项，Hub REST记录完整表达。用户后续真实任务已提交多表达，但原生词复用有差异；Recall Skill经离线消融后获用户授权采用五步精简稿，已删除全部示例并同步安装，实际模型行为效果待观察。",
   "files": [
     {
       "target": "/Users/hemu/.codex/KNOWLEDGE.md",
       "prepared": "integrations/codex/KNOWLEDGE.md",
       "baselineSha256": "38d8971f0a3a7bbdc1f7746e6fc7ca8881955fa880ed95c704d200e469ad514b",
       "preparedSha256": "1c754d31ef0f9842fb3676c84452d51092d837ba628d1a59fee973f19cf4389d",
-      "installed": false,
+      "installed": true,
       "initialBaselineSha256": "57b629c0ae698236d689aaed43dc81c695f85c3a542dbe8059feabf4131d0440",
-      "installedSha256": "38d8971f0a3a7bbdc1f7746e6fc7ca8881955fa880ed95c704d200e469ad514b"
+      "installedSha256": "1c754d31ef0f9842fb3676c84452d51092d837ba628d1a59fee973f19cf4389d"
     },
     {
       "target": "/Users/hemu/.codex/skills/memory-recall/SKILL.md",
       "prepared": "integrations/codex/skills/memory-recall/SKILL.md",
       "baselineSha256": "9f3859c9a2283352fad6b048e2c28c4efac3aced7d2b2349d7471084f7b2897b",
-      "preparedSha256": "290a53caa07b69d6679919087a3885ab9e23013c9d93453ebd9e18d36dfea9c1",
-      "installed": false,
+      "preparedSha256": "0c215f16f9d07d501117107794c2e4bebc284f069cf2b6e0f87781ac491c6f2d",
+      "installed": true,
       "initialBaselineSha256": "8a340a5f40bb03f03bb2ec48e96fbad426d3c0a6f1ece23399bef2b95aa07f83",
-      "installedSha256": "9f3859c9a2283352fad6b048e2c28c4efac3aced7d2b2349d7471084f7b2897b"
+      "installedSha256": "0c215f16f9d07d501117107794c2e4bebc284f069cf2b6e0f87781ac491c6f2d"
     },
     {
       "target": "/Users/hemu/.codex/skills/memory-usage-settlement/SKILL.md",
@@ -33,9 +33,9 @@
       "prepared": "integrations/codex/skills/knowledge-capture/SKILL.md",
       "baselineSha256": "b878bd26a060e32f01effe013e830857e82ee0e59a759b1b990ddff146fb89d2",
       "preparedSha256": "ef6651efb40179fb54be485295913f100703424ac047c7a5a7909bb803e0d4b9",
-      "installed": false,
+      "installed": true,
       "initialBaselineSha256": "fae42c0446e41cf120ceee5e14145f94c4d411087d3ebaa3a611f8e2301b3571",
-      "installedSha256": "b878bd26a060e32f01effe013e830857e82ee0e59a759b1b990ddff146fb89d2"
+      "installedSha256": "ef6651efb40179fb54be485295913f100703424ac047c7a5a7909bb803e0d4b9"
     },
     {
       "target": "/Users/hemu/.codex/skills/memory-recall/agents/openai.yaml",
@@ -74,5 +74,28 @@
       "installed": true
     }
   ],
-  "backupDirectory": "knowledge-base/backups/preauthorized-cutover-20260909-093644"
+  "backupDirectory": "knowledge-base/backups/preauthorized-cutover-20260909-093644",
+  "multiExpressionCutover": {
+    "date": "2026-09-09",
+    "backupDirectory": "knowledge-base/backups/multi-query-20260909-170556",
+    "backupProtocolState": "codex-protocol.tgz保存切换前已安装的2.3协议；schema-3-rollback-protocol.tgz由已审核protocol.diff反向还原，三份文件均与2.2 baselineSha256一致，供旧构建与schema-3数据库配套恢复。",
+    "fromSchemaVersion": 3,
+    "schemaVersion": 4,
+    "mcpVersion": "2.3.0",
+    "verification": {
+      "build": "PASS",
+      "integrityCheck": "ok",
+      "foreignKeyViolations": 0,
+      "migrationPreservation": "12张表逐行摘要比对通过；38条历史query仅包装为单元素数组，其余数据原样保留。",
+      "serviceReadiness": "READY",
+      "watcherState": "RUNNING",
+      "liveMcpRecallId": "usg301303517259925773772604853764245324122470464709208306069",
+      "liveMcpQueries": ["资金单", "企业资金账户", "customer_fund_order"],
+      "liveMcpDeliveredAssets": 5,
+      "liveMcpModelVisibleCharacters": 2901,
+      "hubRestQueries": "MATCH",
+      "desktopAutomaticExpansion": "OBSERVED_WITH_KEYWORD_REUSE_VARIATION",
+      "userReportedRecallId": "usg301304335171333784719215110384142116146615764059992566357"
+    }
+  }
 }

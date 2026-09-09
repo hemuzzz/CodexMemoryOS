@@ -1,23 +1,23 @@
 {
-  "status": "2026-09-09 预授权配置及协议已安装，Server已构建启动READY；Hook信任/客户端重载及真实自动识别待验收",
+  "status": "2026-09-09 多表达召回2.3源码与协议已准备；3个协议文件待同批安装，schema-4迁移/构建切换/客户端重载及真实验收未执行。保留已安装的触发与治理修订。",
   "files": [
     {
       "target": "/Users/hemu/.codex/KNOWLEDGE.md",
       "prepared": "integrations/codex/KNOWLEDGE.md",
-      "baselineSha256": "dee889314ef32b5c9db67f5066d408fe539ed40c92421f53577caa01ca25057e",
-      "preparedSha256": "10d89fc5fd2d67ce997bdfedb5b77d33715b52b32b8cebf9b8f48d56d73eccfe",
-      "installed": true,
+      "baselineSha256": "38d8971f0a3a7bbdc1f7746e6fc7ca8881955fa880ed95c704d200e469ad514b",
+      "preparedSha256": "1c754d31ef0f9842fb3676c84452d51092d837ba628d1a59fee973f19cf4389d",
+      "installed": false,
       "initialBaselineSha256": "57b629c0ae698236d689aaed43dc81c695f85c3a542dbe8059feabf4131d0440",
-      "installedSha256": "10d89fc5fd2d67ce997bdfedb5b77d33715b52b32b8cebf9b8f48d56d73eccfe"
+      "installedSha256": "38d8971f0a3a7bbdc1f7746e6fc7ca8881955fa880ed95c704d200e469ad514b"
     },
     {
       "target": "/Users/hemu/.codex/skills/memory-recall/SKILL.md",
       "prepared": "integrations/codex/skills/memory-recall/SKILL.md",
-      "baselineSha256": "5ac5cd74efa1e0c3bb6a79ab039ec7a28860b9daebaeb31e33d4e8ddaa5b956f",
-      "preparedSha256": "3f5303caad95e0cec637bb847c4282375c781ecd65071f99b1bfe99ee55bb31c",
-      "installed": true,
+      "baselineSha256": "9f3859c9a2283352fad6b048e2c28c4efac3aced7d2b2349d7471084f7b2897b",
+      "preparedSha256": "290a53caa07b69d6679919087a3885ab9e23013c9d93453ebd9e18d36dfea9c1",
+      "installed": false,
       "initialBaselineSha256": "8a340a5f40bb03f03bb2ec48e96fbad426d3c0a6f1ece23399bef2b95aa07f83",
-      "installedSha256": "3f5303caad95e0cec637bb847c4282375c781ecd65071f99b1bfe99ee55bb31c"
+      "installedSha256": "9f3859c9a2283352fad6b048e2c28c4efac3aced7d2b2349d7471084f7b2897b"
     },
     {
       "target": "/Users/hemu/.codex/skills/memory-usage-settlement/SKILL.md",
@@ -31,11 +31,11 @@
     {
       "target": "/Users/hemu/.codex/skills/knowledge-capture/SKILL.md",
       "prepared": "integrations/codex/skills/knowledge-capture/SKILL.md",
-      "baselineSha256": "2caa723600ae81fe2ff5c60c0cfbbd3c8d4f696678479c67bc409128c080e4db",
-      "preparedSha256": "2caa723600ae81fe2ff5c60c0cfbbd3c8d4f696678479c67bc409128c080e4db",
-      "installed": true,
+      "baselineSha256": "b878bd26a060e32f01effe013e830857e82ee0e59a759b1b990ddff146fb89d2",
+      "preparedSha256": "ef6651efb40179fb54be485295913f100703424ac047c7a5a7909bb803e0d4b9",
+      "installed": false,
       "initialBaselineSha256": "fae42c0446e41cf120ceee5e14145f94c4d411087d3ebaa3a611f8e2301b3571",
-      "installedSha256": "2caa723600ae81fe2ff5c60c0cfbbd3c8d4f696678479c67bc409128c080e4db"
+      "installedSha256": "b878bd26a060e32f01effe013e830857e82ee0e59a759b1b990ddff146fb89d2"
     },
     {
       "target": "/Users/hemu/.codex/skills/memory-recall/agents/openai.yaml",

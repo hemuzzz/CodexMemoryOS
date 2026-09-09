@@ -22,6 +22,7 @@
     "rebuild-index": "node dist/maintenance-cli.js rebuild-index",
     "smoke:codex:build": "node test-support/codex-client-build-smoke.mjs",
     "knowledge:migrate": "node dist/maintenance-cli.js migrate-knowledge",
+    "recall:migrate": "node dist/maintenance-cli.js migrate-recall-queries",
     "runtime:retire": "node dist/maintenance-cli.js retire-old-runtime",
     "capability:revoke": "node dist/maintenance-cli.js revoke-capability",
     "typecheck:source": "tsc --project tsconfig.source-check.json --noEmit"

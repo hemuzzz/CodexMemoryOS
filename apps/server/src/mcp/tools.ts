@@ -25,7 +25,7 @@ export interface AssetMcpDependencies {
   knowledgeService: KnowledgeService; logger: StructuredLogger; onInternalError?: (error: unknown) => void;
 }
 export function createAssetMcpServer(dependencies: AssetMcpDependencies): McpServer {
-  const server = new McpServer({ name: "codex-memory-os", version: "2.2.0" });
+  const server = new McpServer({ name: "codex-memory-os", version: "2.3.0" });
   const execute = async (operation: () => Promise<unknown>): Promise<CallToolResult> => {
     try {
       // Exactly one serialized representation: no duplicate structuredContent.
@@ -39,7 +39,7 @@ export function createAssetMcpServer(dependencies: AssetMcpDependencies): McpSer
       return { isError: true, content: [{ type: "text", text: JSON.stringify({ error: { code } }) }] };
     }
   };
-  server.registerTool("knowledge_recall", { description: "Recall knowledge using a concise current Query and explicitly selected capabilities. [] selects GLOBAL only.", inputSchema: recallInputSchema },
+  server.registerTool("knowledge_recall", { description: "Recall knowledge with 1–8 concise search expressions in queries. Generate relevant terms and synonyms as you would for native memory; reuse suitable expressions for the same purpose. Terms within an expression are AND; expressions are OR. One deduplicated result shares the 8-asset/5000-character budget. Explicit capabilityIds selects scope; [] selects GLOBAL only.", inputSchema: recallInputSchema },
     async (input) => execute(() => dependencies.knowledgeService.recall(input)));
   server.registerTool("scenario_list", { description: "List enabled applicable scenarios; does not activate them.", inputSchema: scenarioInputSchema,
     annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false } },

@@ -4,7 +4,7 @@ CodexMemoryOS 是一个个人、本地、Codex 专用的知识运行时。Markdo
 
 Native Memories 提供客户端历史背景，本服务维护经人工确认、需要明确维护的工程知识；两者各自参与任务，不自动同步会话摘要、不扫描 Native 存储、不合并计数。始终适用的指导放在 AGENTS.md 或版本化文档。知识正文与模板统一见 [知识内容模型](工程约定/知识内容模型.md)。
 
-当前 2.2 源码提供显式多 Workspace 能力选择、Recall/Read/Used、只读 Hub/REST、HTTP MCP 和单文件人工确认命令。它不依赖模型 API、MemoryProxy、Obsidian 或团队服务，也不会自动捕获、自动确认或批量确认知识。Hub 只读，不提供确认、编辑、移动或删除操作。
+当前 2.3 源码提供多表达召回、显式多 Workspace 能力选择、Recall/Read/Used、只读 Hub/REST、HTTP MCP 和单文件人工确认命令。多表达修订尚未切换到本机运行服务；下方2.2历史验收不代表2.3验收。它不依赖模型 API、MemoryProxy、Obsidian 或团队服务，也不会自动捕获、自动确认或批量确认知识。Hub 只读，不提供确认、编辑、移动或删除操作。
 
 ## 项目文档
 
@@ -189,26 +189,46 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 \
 
 使用 `Ctrl-C`（SIGINT）停止前台进程；进程管理器也可发送 SIGTERM。Server 会关闭 HTTP 连接、Watcher 和 SQLite 连接。应先启动 Server，再启动依赖它的 Codex MCP Client；不要为此项目额外建设守护进程或服务管理平台。
 
-## Codex Hook 与 MCP（2.2）
+## Codex Hook 与 MCP（2.3 源码）
 
 新版源码取消业务Task、Session/Turn、Loadout依赖。Hook将真实cwd项目和明确预授权项目交付为持续能力，附项目名称、别名、说明；不解析Prompt、不自动执行Recall。Recall Skill自动识别项目业务、表/接口、故障与历史判断请求，先召回，再核对当前源码；每次只选择相关能力，不受会话cwd限制。2026-09-09已完成本机真实能力传递、别名选择、双项目召回与Used结算验收，用户确认本轮验收成功、无阻碍；模型路径参数不授予权限。
 
-新环境切换前按 [2.2 实施与人工切换](项目文档/验证记录/04-设计2.2实现与人工切换.md) 执行离线迁移、构建、协议安装和人工验收；本机已完成切换，无需重复迁移。完整替换内容位于 `integrations/codex/`，不要只更新后端。
+2.2历史安装过程见 [2.2 实施与人工切换](项目文档/验证记录/04-设计2.2实现与人工切换.md)。升级当前源码需执行下方2.3升级步骤；完整协议位于 `integrations/codex/`，不要只更新后端。
 
 | 正常 MCP 工具 | 输入与行为 |
 |---|---|
-| knowledge_recall | capabilityIds[]、query、scenarios可选；当前检索表达，资格去重后两桶4/4不足回流，最多8项、完整JSON最多5000 Unicode code points |
+| knowledge_recall | capabilityIds[]、queries[]、scenarios可选；项内AND、项间OR，Asset最佳匹配去重后两桶4/4不足回流，所有表达共享最多8项、完整JSON最多5000 Unicode code points |
 | scenario_list | capabilityIds[]、offset/limit可选；纯读取适用的启用场景 |
 | asset_read | capabilityIds[] + recallItemId，或assetId + expectedContentHash可选；当前Hash契约，正文上限256000 UTF-8字节 |
 | asset_mark_used | capabilityIds[] + recallItemId或readRef；实际影响才使用，来源幂等，允许内容演进后的合法旧引用 |
 
-capabilityIds必填且最多8个，[]只访问GLOBAL；Query最大256字符、不含控制字符；Scenario最多4个，单ID最大40字符。能力持久层只保存SHA-256摘要，无TTL；映射变化或明确撤销失效，不因时间、重启或无关配置变化失效。单个Workspace名称最多128字符、禁止控制字符。预授权关闭后，由预授权签发的额外能力失效；由真实cwd签发的能力仍按原映射校验。恢复同一预授权配置可能恢复其未撤销能力，永久失效仍须显式撤销摘要。
+capabilityIds必填且最多8个，[]只访问GLOBAL；queries必填1–8项，每项1–256字符、不含控制字符，大小写/空白差异去重。旧query输入拒绝。Scenario最多4个，单ID最大40字符。能力持久层只保存SHA-256摘要，无TTL；映射变化或明确撤销失效，不因时间、重启或无关配置变化失效。单个Workspace名称最多128字符、禁止控制字符。预授权关闭后，由预授权签发的额外能力失效；由真实cwd签发的能力仍按原映射校验。恢复同一预授权配置可能恢复其未撤销能力，永久失效仍须显式撤销摘要。
+
+模型像搜索原生Memories一样提炼同义表达和有依据的中英文/代码名称；同目的已有适用表达直接复用，无需先调用原生检索。例：`queries: ["业务字典", "字典配置", "dictconfig", "sys_dict"]`。服务端复用现有文字/FTS匹配，不自动扩词、不把`a|b`解释为OR、不按同义命中次数加分。Recall记录与Hub保留本次完整表达数组。
 
 Recall/Read事实写失败仍交付合格知识，usageRecorded=false、无本次稳定引用。Used失败明确报错。Usage按assetId跨内容累计，不按Hash分版本；旧引用Read遇内容更新仍返回CONTENT_CHANGED。正常MCP无asset_search和旧装配工具；Hub搜索保持纯检索。
 
 策略原件为 `CODEX_MEMORY_OS_WORKSPACES_PATH` 同目录的 `recall-policy.json`。缺失/损坏时关闭增强、保留基础召回；未知Workspace绑定单项隔离。示例 `integrations/codex/recall-policy.example.json` 的场景全部禁用，没有生成真实关系或启用策略。
 
 MCP仍使用本地回环 `/mcp` 和原有Host/Origin检查。注册示例见 `integrations/codex/mcp.toml.example`；注册本身不等于真实客户端已采用协议。
+
+### 多表达召回升级（2.3）
+
+本节是待执行的运行环境切换步骤，源码实现和测试不执行这些生产操作。需同时升级数据库、Server/Hub构建及`integrations/codex/`中的KNOWLEDGE、Recall、capture协议，再重载客户端；不能先给旧服务安装queries协议。
+
+1. 停止服务及所有同库Hook/写入方，保留可恢复的数据库、构建产物与已安装协议备份。核对数据库绝对路径。旧schema-1或全新环境先按2.2流程执行knowledge:migrate到2；已有2/3无需重跑初始化。
+2. 构建当前源码后，显式离线升级到schema-4：
+
+   ```bash
+   CODEX_MEMORY_OS_DATABASE_PATH='/absolute/data/codex-memory.sqlite' \
+   npx -y -p node@22.16.0 -p pnpm@11.1.3 \
+     pnpm --filter @codex-memory-os/server recall:migrate --offline
+   ```
+
+   该命令只把历史query原样包成单元素JSON数组，保留ID、时间、范围、条目、Read/Used、能力、Catalog/FTS与正文双版；失败整笔回滚，可重试。不会清空数据或代替旧Task表退役。新服务遇旧Schema明确要求迁移，不在启动时自动修改。
+3. 按manifest核对待安装文件与当前基线，完成协议安装、启动服务、重载Codex。检查MCP发布queries数组并实际用多表达召回，核对Hub列表/详情与旧记录、完整5000字符预算、Read/Used和真实Hook能力传递。单纯构建或SDK测试不能代替此步。
+
+若需要恢复2.2，应在停止所有写入后恢复同批数据库、构建和协议备份，不能仅降级程序读取schema-4。
 
 ## 单文件人工确认
 

@@ -40,7 +40,7 @@ export class AssetContentVersionRepository {
           this.database.exec(CONTENT_VERSION_TABLE_SQL);
           this.database.pragma("user_version = 1");
         } else {
-          if (![1, 2, 3].includes(Number(installed))) throw new ContentVersionIntegrityError("Unsupported content storage version");
+          if (![1, 2, 3, 4].includes(Number(installed))) throw new ContentVersionIntegrityError("Unsupported content storage version");
           // Validate the actual constraints, not just the column names.
           const sql = (table as { sql: string }).sql;
           if (sql.replace(/\s+/gu, "").toLowerCase() !== CONTENT_VERSION_TABLE_SQL.replace(/\s+/gu, "").toLowerCase()) {

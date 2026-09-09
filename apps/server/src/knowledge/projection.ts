@@ -4,7 +4,7 @@ import type { WorkspaceCapabilityService } from "../workspace/capability.js";
 import { applicableScenarios, loadPolicy } from "./policy.js";
 import { scanAssetRepository, type AssetScanOptions } from "../asset/index.js";
 export interface RecallProjection {
-  recallId: string; authorizedWorkspaces: string[]; query: string; scenarios: string[]; policyHash: string | null;
+  recallId: string; authorizedWorkspaces: string[]; queries: string[]; scenarios: string[]; policyHash: string | null;
   occurredAt: string; diagnostics: string[]; budget: RecallResult["budget"];
 }
 export interface ItemProjection extends Source { recallItemId: string; selectionReasons: string[]; bucket: string;
@@ -15,23 +15,23 @@ export class KnowledgeProjection {
   constructor(readonly repository: KnowledgeRepository, readonly capabilities: WorkspaceCapabilityService,
     readonly policyPath: string, readonly scanOptions: AssetScanOptions) {}
   recalls(offset = 0, limit = 50) {
-    const rows = this.repository.db.prepare<[number, number], { recallId: string; scopes: string; query: string; scenarios: string;
+    const rows = this.repository.db.prepare<[number, number], { recallId: string; scopes: string; queriesJson: string; scenarios: string;
       policyHash: string | null; occurredAt: string; diagnostics: string; budget: string }>(`SELECT recall_id AS recallId,
-      authorized_workspaces_json AS scopes, query, active_scenarios_json AS scenarios, policy_hash AS policyHash,
+      authorized_workspaces_json AS scopes, queries_json AS queriesJson, active_scenarios_json AS scenarios, policy_hash AS policyHash,
       occurred_at AS occurredAt, diagnostics_json AS diagnostics, budget_json AS budget FROM recall_operation
       ORDER BY occurred_at DESC, recall_id DESC LIMIT ? OFFSET ?`).all(limit, offset);
-    const items: RecallProjection[] = rows.map((r) => ({ ...r, authorizedWorkspaces: JSON.parse(r.scopes) as string[],
+    const items: RecallProjection[] = rows.map(({ queriesJson, ...r }) => ({ ...r, queries: JSON.parse(queriesJson) as string[], authorizedWorkspaces: JSON.parse(r.scopes) as string[],
       scenarios: JSON.parse(r.scenarios) as string[], diagnostics: JSON.parse(r.diagnostics) as string[], budget: JSON.parse(r.budget) as RecallResult["budget"] }));
     return { items, total: this.count("recall_operation") };
   }
   recall(id: string) {
     const row = this.repository.db.prepare<[string], { n: number }>("SELECT count(*) AS n FROM recall_operation WHERE recall_id=?").get(id);
     if (!row?.n) return null;
-    const raw = this.repository.db.prepare<[string], { recallId: string; scopes: string; query: string; scenarios: string;
+    const { queriesJson, ...raw } = this.repository.db.prepare<[string], { recallId: string; scopes: string; queriesJson: string; scenarios: string;
       policyHash: string | null; occurredAt: string; diagnostics: string; budget: string }>(`SELECT recall_id AS recallId,
-      authorized_workspaces_json AS scopes, query, active_scenarios_json AS scenarios, policy_hash AS policyHash,
+      authorized_workspaces_json AS scopes, queries_json AS queriesJson, active_scenarios_json AS scenarios, policy_hash AS policyHash,
       occurred_at AS occurredAt, diagnostics_json AS diagnostics, budget_json AS budget FROM recall_operation WHERE recall_id=?`).get(id)!;
-    const operation: RecallProjection = { ...raw, authorizedWorkspaces: JSON.parse(raw.scopes) as string[], scenarios: JSON.parse(raw.scenarios) as string[],
+    const operation: RecallProjection = { ...raw, queries: JSON.parse(queriesJson) as string[], authorizedWorkspaces: JSON.parse(raw.scopes) as string[], scenarios: JSON.parse(raw.scenarios) as string[],
       diagnostics: JSON.parse(raw.diagnostics) as string[], budget: JSON.parse(raw.budget) as RecallResult["budget"] };
     return { operation, items: this.items("i.recall_id=?", id) };
   }

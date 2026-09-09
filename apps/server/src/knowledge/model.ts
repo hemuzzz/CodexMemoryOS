@@ -9,7 +9,7 @@ export const referenceSchema = z.string().regex(/^usg[0-9]+$/u);
 export const hashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 export const recallInputSchema = z.object({
   capabilityIds: capabilityIdsSchema,
-  query: z.string().trim().min(1).max(256).regex(/^[^\u0000-\u001f\u007f]+$/u),
+  queries: z.array(z.string().trim().min(1).max(256).regex(/^[^\u0000-\u001f\u007f]+$/u)).min(1).max(8),
   scenarios: z.array(z.string().min(1).max(40)).max(4).default([]),
 }).strict();
 export const readInputSchema = z.union([
@@ -37,7 +37,7 @@ export interface Budget {
   directBucketAssets: number; queryBucketAssets: number; omittedCount: number; downgradedCount: number;
 }
 export interface RecallResult {
-  usageRecorded: boolean; recallId: string | null; authorizedWorkspaces: string[]; query: string;
+  usageRecorded: boolean; recallId: string | null; authorizedWorkspaces: string[]; queries: string[];
   scenarios: string[]; policyHash?: string; occurredAt: string; items: RecallItem[]; diagnostics: string[]; budget: Budget;
 }
 export interface ReadFact extends Source {

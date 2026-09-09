@@ -1,6 +1,6 @@
 import { SnowflakeIdGenerator } from "@codex-memory-os/id-generator";
 import { AssetNotAccessibleError, AssetNotFoundError, type AssetSearchService } from "../asset/index.js";
-import { compareRankedItems, type RankedSearchItem } from "../asset/search.js";
+import { compareRankedItems, normalizeAssetSearchQuery, type RankedSearchItem } from "../asset/search.js";
 import type { WorkspaceCapabilityService } from "../workspace/capability.js";
 import { applicableScenarios, loadPolicy } from "./policy.js";
 import { KnowledgeError, recallInputSchema, readInputSchema, usedInputSchema, scenarioInputSchema,
@@ -25,7 +25,15 @@ export class KnowledgeService {
   async recall(input: unknown): Promise<RecallResult> {
     const parsed = recallInputSchema.safeParse(input);
     if (!parsed.success) throw new KnowledgeError("INPUT_INVALID");
-    const { query, scenarios } = parsed.data;
+    const { scenarios } = parsed.data;
+    // Use the searcher's case/whitespace semantics for deduplication; retain the
+    // first expression's spelling for the operation record and model response.
+    const expressions = new Map<string, string>();
+    for (const query of parsed.data.queries) {
+      const key = normalizeAssetSearchQuery(query).phrase;
+      if (!expressions.has(key)) expressions.set(key, query.split(/\s+/u).join(" "));
+    }
+    const queries = [...expressions.values()];
     const { authorizedWorkspaces, config } = await this.capabilities.select(parsed.data.capabilityIds);
     this.assertReady();
     const snapshot = await loadPolicy(this.policyPath, config);
@@ -34,10 +42,15 @@ export class KnowledgeService {
     const diagnostics = [...snapshot.diagnostics];
     if (scenarios.some((id) => !active.some((scenario) => scenario.id === id))) diagnostics.push("SCENARIO_SKIPPED");
     const context = { authorizedWorkspaces, workspaceConfigSnapshot: config };
-    const ranked = await this.search.rankedCandidates(context, query);
-    const ranks = new Map(ranked.map((rank) => [rank.assetId, rank]));
+    const ranks = new Map<string, RankedSearchItem>();
+    for (const query of queries) {
+      for (const rank of await this.search.rankedCandidates(context, query)) {
+        const prior = ranks.get(rank.assetId);
+        if (!prior || compareRankedItems(rank, prior) < 0) ranks.set(rank.assetId, rank);
+      }
+    }
     const reasons = new Map<string, string[]>();
-    for (const rank of ranked) reasons.set(rank.assetId, ["QUERY_MATCH"]);
+    for (const assetId of ranks.keys()) reasons.set(assetId, ["QUERY_MATCH"]);
     for (const scenario of active) for (const relation of scenario.assets) {
       if (relation.mode === "ON_DEMAND" && !ranks.has(relation.assetId)) continue;
       const prior = reasons.get(relation.assetId) ?? [];
@@ -79,7 +92,7 @@ export class KnowledgeService {
       return a.item.assetId < b.item.assetId ? -1 : a.item.assetId > b.item.assetId ? 1 : 0;
     };
     const buckets = { DIRECT: candidates.filter((c) => c.item.bucket === "DIRECT").sort(compare), QUERY: candidates.filter((c) => c.item.bucket === "QUERY").sort(compare) };
-    const result: RecallResult = { usageRecorded: true, recallId: this.ids.next("usg"), authorizedWorkspaces, query,
+    const result: RecallResult = { usageRecorded: true, recallId: this.ids.next("usg"), authorizedWorkspaces, queries,
       scenarios: active.map((s) => s.id), ...(snapshot.hash ? { policyHash: snapshot.hash } : {}), occurredAt: new Date().toISOString(),
       items: [], diagnostics, budget: { maxAssets: 8, maxModelVisibleCharacters: 5000, modelVisibleCharacters: 0,
         knowledgeContentCharacters: 0, metadataCharacters: 0, deliveredAssets: 0, directBucketAssets: 0, queryBucketAssets: 0,

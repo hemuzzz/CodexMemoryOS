@@ -49,7 +49,8 @@ watch(route, refresh); onActivated(refresh); onBeforeUnmount(() => controller?.a
           <p v-if="!scenarios.scenarios.length">暂无场景；基础 Query 召回仍可使用。</p>
         </template>
         <template v-else-if="route.page === 'recalls' && detail">
-          <button class="quiet-button" @click="navigate('recalls')">返回召回列表</button><h2>{{ detail.operation.query }}</h2>
+          <button class="quiet-button" @click="navigate('recalls')">返回召回列表</button><h2>检索表达</h2>
+          <ul class="recall-expressions"><li v-for="(query, index) in detail.operation.queries" :key="index">{{ query }}</li></ul>
           <p>授权：GLOBAL + {{ detail.operation.authorizedWorkspaces.join('、') || '无项目' }} · 场景 {{ detail.operation.scenarios.join('、') || '无' }}</p>
           <p>字符 {{ detail.operation.budget.modelVisibleCharacters }} / {{ detail.operation.budget.maxModelVisibleCharacters }}（知识 {{ detail.operation.budget.knowledgeContentCharacters }}，元数据 {{ detail.operation.budget.metadataCharacters }}）· DIRECT {{ detail.operation.budget.directBucketAssets }} / Query {{ detail.operation.budget.queryBucketAssets }} · 省略 {{ detail.operation.budget.omittedCount }}</p>
           <p>{{ detail.operation.diagnostics.join('、') }}</p>
@@ -57,7 +58,7 @@ watch(route, refresh); onActivated(refresh); onBeforeUnmount(() => controller?.a
           <p v-if="!detail.items.length">本次召回没有交付条目。</p>
         </template>
         <template v-else-if="route.page === 'recalls'">
-          <div class="table-scroll"><table><thead><tr><th>Query</th><th>授权范围</th><th>场景</th><th>条目 / 字符</th><th>时间</th></tr></thead><tbody><tr v-for="item in recalls" :key="item.recallId"><td><button class="quiet-button" @click="navigate('recalls',item.recallId)">{{ item.query }}</button></td><td>GLOBAL + {{ item.authorizedWorkspaces.join('、') || '无项目' }}</td><td>{{ item.scenarios.join('、') || '无' }}</td><td>{{ item.budget.deliveredAssets }} / {{ item.budget.modelVisibleCharacters }}</td><td>{{ formatDate(item.occurredAt) }}</td></tr></tbody></table></div><p v-if="!recalls.length">暂无已记录召回。</p>
+          <div class="table-scroll"><table><thead><tr><th>检索表达</th><th>授权范围</th><th>场景</th><th>条目 / 字符</th><th>时间</th></tr></thead><tbody><tr v-for="item in recalls" :key="item.recallId"><td><button class="quiet-button recall-expressions" @click="navigate('recalls',item.recallId)"><span v-for="(query, index) in item.queries" :key="index">{{ query }}</span></button></td><td>GLOBAL + {{ item.authorizedWorkspaces.join('、') || '无项目' }}</td><td>{{ item.scenarios.join('、') || '无' }}</td><td>{{ item.budget.deliveredAssets }} / {{ item.budget.modelVisibleCharacters }}</td><td>{{ formatDate(item.occurredAt) }}</td></tr></tbody></table></div><p v-if="!recalls.length">暂无已记录召回。</p>
         </template>
         <template v-else-if="route.page === 'usage'">
           <div class="table-scroll"><table><thead><tr><th>事实</th><th>知识 / 来源</th><th>授权范围</th><th>交付 Hash / 引用</th><th>时间</th></tr></thead><tbody><tr v-for="item in usage" :key="item.id"><td>{{ item.kind === 'READ' ? '读取' : '使用' }}</td><td><button class="quiet-button" @click="navigate('library',item.assetId)">{{ item.assetId }}</button><small>{{ item.assetWorkspace ?? 'GLOBAL' }}</small></td><td>GLOBAL + {{ item.authorizedWorkspaces.join('、') || '无项目' }}</td><td><code>{{ item.contentHash }}</code><small>{{ item.recallItemId ?? item.readRef }}</small></td><td>{{ formatDate(item.occurredAt) }}</td></tr></tbody></table></div><p v-if="!usage.length">暂无已记录读取或使用。</p>
@@ -67,3 +68,11 @@ watch(route, refresh); onActivated(refresh); onBeforeUnmount(() => controller?.a
     </div>
   </main>
 </template>
+<style scoped>
+.recall-expressions { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+button.recall-expressions {
+  display: block; width: 100%; min-width: 10rem; max-width: 32rem;
+  height: auto; min-height: 28px; padding: 0; line-height: inherit;
+}
+.recall-expressions span { display: block; }
+</style>

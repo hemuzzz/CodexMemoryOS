@@ -4,7 +4,7 @@ CodexMemoryOS 是一个个人、本地、Codex 专用的知识运行时。Markdo
 
 Native Memories 提供客户端历史背景，本服务维护经人工确认、需要明确维护的工程知识；两者各自参与任务，不自动同步会话摘要、不扫描 Native 存储、不合并计数。始终适用的指导放在 AGENTS.md 或版本化文档。知识正文与模板统一见 [知识内容模型](工程约定/知识内容模型.md)。
 
-当前 2.3 源码提供多表达召回、显式多 Workspace 能力选择、Recall/Read/Used、只读 Hub/REST、HTTP MCP 和单文件人工确认命令。多表达修订尚未切换到本机运行服务；下方2.2历史验收不代表2.3验收。它不依赖模型 API、MemoryProxy、Obsidian 或团队服务，也不会自动捕获、自动确认或批量确认知识。Hub 只读，不提供确认、编辑、移动或删除操作。
+当前 2.4 提供多表达召回、显式多 Workspace 能力选择、Recall/Read/Used、只读 Hub/REST、HTTP MCP 和单文件人工确认命令，本机已完成 2.4 切换。工程交付另有知识评估短记录与 Stop 非阻断提醒，见下文。它不依赖模型 API、MemoryProxy、Obsidian 或团队服务，也不会由 Hook 自动捕获、自动确认或批量确认知识。Hub 只读，不提供确认、编辑、移动或删除操作。
 
 ## 项目文档
 
@@ -209,6 +209,20 @@ Recall/Read事实写失败仍交付合格知识，usageRecorded=false、无本�
 MEMORY匹配分数达到现有阈值且预算允许时返回摘要，其他条目通过引用按需Read；DOCUMENT/SKILL保持引用交付。全部候选使用一个排序序列，不预留固定资料名额。
 
 MCP仍使用本地回环 `/mcp` 和原有Host/Origin检查。注册示例见 `integrations/codex/mcp.toml.example`；注册本身不等于真实客户端已采用协议。
+
+### 交付前知识评估与非阻断提醒
+
+按[知识评估设计](项目文档/设计方案/06-知识评估标准与Stop兜底设计.md)，主 Agent 在工程交付前提炼要点、核对增量，并提交本轮短结果。判断标准及四种结果只在 `knowledge-capture` Skill 维护。项目文档已有内容不直接等于无增量；普通无工具交流无需记录。
+
+- UserPromptSubmit 保持原能力交付，追加本轮 Session/Turn 标识和记录命令；不初始化记录、不预测后续工作。
+- PostToolUse 匹配 `Bash|apply_patch`，同步创建一次活动标记。Stop 发现记录缺失、无效或 FAILED 时只返回 `systemMessage`；不阻断、不自动补跑，候选待确认静默结束。
+- 两个新 Hook 使用 `integrations/codex/capture-hook.sh`，直接执行构建后的 CLI；仅依赖本地缓存，不访问知识数据库或 MCP。示例配置见 `integrations/codex/hooks.json.example`，超时 1 秒，CLI 内部 750 ms 降级。
+- 记录命令从 Hook 上下文取得，通过 stdin 接收 JSON；手动安装时 `capture:assess` 等价于 `node apps/server/dist/hook/capture-cli.js --record`，须明确设置绝对路径 `CODEX_MEMORY_OS_CAPTURE_CACHE_PATH`。不要用包管理器启动每次活动 Hook。
+- 本机包装脚本固定缓存为 `knowledge-base/runtime/capture/`，Session/Turn 摘要目录内最多有 `assessment.json`、`activity.flag`、`warned.flag`；评估最大 8 KiB，普通无活动回合不写缓存，无数据库迁移或历史报表。
+
+安装时同步 capture Skill、全局知识规则、两个事件注册，以及版本化包装脚本。当前 `knowledge-base/user-prompt-submit.sh` 转发到 `integrations/codex/user-prompt-submit.sh`；其他机器需按本机路径调整固定 Node 22.16.0 位置，不能照抄本机绝对路径。配置变化后通过正常 `/hooks` 界面核对与信任精确定义；服务重启不等于 Desktop 已加载新 Hook。实际安装、测量和待验收项见[验证记录](项目文档/验证记录/08-知识评估Hook实现与安装验证.md)。
+
+程序只证明本轮声明存在，不审核自然语言判断，不独立发现同轮记录过期。工具范围外的只读/纯对话工程交付仍由主 Agent 自主评估，可能漏提醒；缓存故障时仍允许结束且可能无法去重。验证命令：`pnpm --filter @codex-memory-os/server smoke:capture:build`（固定 Node/pnpm，先构建）。
 
 ### 召回存储升级（2.4）
 

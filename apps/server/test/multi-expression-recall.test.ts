@@ -238,6 +238,13 @@ test("MCP publishes an object-root queries array and returns one serialized resu
   assert.equal(f.projection.totals().recallOperations, 1);
   const hook = await handleCodexHook({ hook_event_name: "UserPromptSubmit", cwd: "/workspace/alpha" }, f);
   assert.ok(hook?.includes("queries"));
+  const captureHook = await handleCodexHook({ hook_event_name: "UserPromptSubmit", cwd: "/workspace/alpha", session_id: "synthetic-session", turn_id: "synthetic-turn" }, { ...f, captureCommand: "/synthetic/capture --record" });
+  const context = JSON.parse(captureHook!).hookSpecificOutput.additionalContext as string;
+  assert.ok(context.includes('"sessionId":"synthetic-session"'));
+  assert.ok(context.includes('"turnId":"synthetic-turn"'));
+  assert.ok(context.includes('"command":"/synthetic/capture --record"'));
+  const missingIdentity = await handleCodexHook({ hook_event_name: "UserPromptSubmit", cwd: "/workspace/alpha" }, { ...f, captureCommand: "/synthetic/capture --record" });
+  assert.match(missingIdentity!, /评估标识缺失/);
 });
 
 test("offline schema 2/3/4 upgrade preserves queries, operation identities, content and references", async t => {

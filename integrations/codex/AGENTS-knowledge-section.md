@@ -9,3 +9,4 @@
 - 仅实际影响工作才通过memory-usage-settlement，以合法持久recallItemId/readRef调用asset_mark_used。合法内容演进可结算旧引用，按assetId累计；来源幂等，Used写失败明确报告。
 - 交付前按knowledge-capture评估；获授权工程工作产生可复用增量时，可准备当前可信Workspace的Inbox候选，明确只读要求优先。访问能力不是额外写入授权。正式确认仍绑定人工批准的确切内容和当前原始字节Hash，修订另核正式基线。
 - 知识故障只暂停依赖步骤，继续独立主任务；不伪造宿主授权、调用结果、计数或验收。详细协议见同目录KNOWLEDGE.md；Native Memories遵循自身规则。
+- 已安装评估记录入口时，工程交付前按 knowledge-capture 提交本轮短结果，普通无工具交流免记录；不能仅因项目文档已写就判无增量。Stop 仅提醒可观察范围内的遗漏，不阻断、不自动补跑。

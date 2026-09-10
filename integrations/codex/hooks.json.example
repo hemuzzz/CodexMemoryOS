@@ -11,6 +11,17 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|apply_patch",
+        "hooks": [{ "type": "command", "command": "/bin/sh '/Users/hemu/Desktop/github/CodexMemoryOS/integrations/codex/capture-hook.sh'", "timeout": 1 }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "/bin/sh '/Users/hemu/Desktop/github/CodexMemoryOS/integrations/codex/capture-hook.sh'", "timeout": 1 }]
+      }
     ]
   }
 }

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="CoolRequestCommonStatePersistent">
-    <option name="searchCache" value="hemu@hemudeMacBook-Pro-4 ~/Desktop/github/CodexMemoryOS % sqlite3 -readonly &quot;$CODEX_MEMORY_OS_DATABASE_PATH&quot; 'PRAGMA user_version;' 0" />
+    <option name="searchCache" value="/knowledge-base/runtime/capture" />
   </component>
 </project>

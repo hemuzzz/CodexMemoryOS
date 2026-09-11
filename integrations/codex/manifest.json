@@ -1,5 +1,5 @@
 {
-  "status": "2026-09-10 已完成知识评估标准与 Stop 非阻断提醒开发及本机安装，沿用 2.4/schema-5。17项相关测试、源码类型检查、Server构建、构建CLI smoke和Skill格式校验通过；已安装capture规则/包装脚本/Hook，正常CLI /hooks信任后三事件Active=1；服务重启READY。Desktop新回合自动行为待验收，无数据库迁移。",
+  "status": "2026-09-11 已同步更新知识评估对象与无增量依据；仓库版与已安装 Skill 格式校验、内容 Hash 核对通过，真实模型效果待验证。2026-09-10 的 Hook 安装与运行验证见 captureInstallation，沿用 2.4/schema-5。",
   "previousStatus": "2026-09-09 多表达召回2.3已完成本地构建、schema-3到4迁移与服务重启；3份已安装协议Hash与准备稿一致。Recall Skill保留五步精简结构；真实任务在加载该稿后仍丢弃业务原词，重放原词命中5项、改写词零命中。现已获用户授权将第2步改为逐项保留同目的原生词、补充词只追加，无原生词时保留业务名称独立项，并同步安装。新规则的实际模型行为效果待验证。",
   "files": [
     {
@@ -32,11 +32,11 @@
     {
       "target": "/Users/hemu/.codex/skills/knowledge-capture/SKILL.md",
       "prepared": "integrations/codex/skills/knowledge-capture/SKILL.md",
-      "baselineSha256": "3ef6176b7a265adbe178d95c3343effe52cdc425810fe262bc37914eafa28528",
-      "preparedSha256": "713a21ff96aa6736e0d7edc8e4c8dfbe3f7913f609153c9e12f30e2b960382b0",
+      "baselineSha256": "713a21ff96aa6736e0d7edc8e4c8dfbe3f7913f609153c9e12f30e2b960382b0",
+      "preparedSha256": "e441ce9892665713a5ed707c6d299d9600dcff5ebb390daca102e446b76aa09e",
       "installed": true,
       "initialBaselineSha256": "fae42c0446e41cf120ceee5e14145f94c4d411087d3ebaa3a611f8e2301b3571",
-      "installedSha256": "713a21ff96aa6736e0d7edc8e4c8dfbe3f7913f609153c9e12f30e2b960382b0"
+      "installedSha256": "e441ce9892665713a5ed707c6d299d9600dcff5ebb390daca102e446b76aa09e"
     },
     {
       "target": "/Users/hemu/.codex/skills/memory-recall/agents/openai.yaml",

@@ -1,0 +1,11 @@
+{
+  "nodePath": "/absolute/path/to/node-22.16.0",
+  "assetRepositoryPath": "/absolute/path/to/knowledge-base/repository",
+  "databasePath": "/absolute/path/to/knowledge-base/runtime/codex-memory.sqlite",
+  "workspaceConfigPath": "/absolute/path/to/knowledge-base/config/workspaces.json",
+  "logPath": "/absolute/path/to/knowledge-base/logs/server.log",
+  "desktopLogPath": "/absolute/path/to/knowledge-base/logs/desktop.log",
+  "port": 18888,
+  "startupTimeoutMs": 30000,
+  "shutdownTimeoutMs": 15000
+}

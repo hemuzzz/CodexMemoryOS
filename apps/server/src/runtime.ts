@@ -36,6 +36,7 @@ const HOST = "127.0.0.1";
 const HUB_DIST_PATH = fileURLToPath(new URL("../../hub/dist/", import.meta.url));
 
 export interface ServerRuntimeConfiguration {
+  buildId?: string;
   assetRepositoryPath: string;
   databasePath: string;
   logPath: string;
@@ -143,6 +144,7 @@ export async function startCodexMemoryOsServer(
       new AssetDiffService(assetSearchService, contentVersions),
     );
     const systemStatusService = new SystemStatusApplicationService({
+      ...(configuration.buildId === undefined ? {} : { buildId: configuration.buildId }),
       repositoryPath: configuration.assetRepositoryPath,
       workspaceConfigPath: configuration.workspaceConfigPath,
       indexStatus: () => indexManager.status(),

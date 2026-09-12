@@ -108,6 +108,7 @@ export interface SystemDiagnostic {
 }
 
 export interface SystemStatus {
+  buildId?: string;
   diagnostics: SystemDiagnostic[];
   index: {
     catalogCount: number | null;

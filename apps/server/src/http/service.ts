@@ -89,6 +89,7 @@ export interface StatusDiagnosticDto {
 }
 
 export interface SystemStatusDto {
+  buildId?: string;
   diagnostics: StatusDiagnosticDto[];
   index: {
     catalogCount: number | null;
@@ -116,6 +117,7 @@ export interface SystemStatusDto {
 }
 
 export interface SystemStatusDependencies extends AssetScanOptions {
+  buildId?: string;
   indexStatus: () => AssetIndexStatus;
   inboxService: Pick<InboxApplicationService, "scan">;
   mcpEndpointReady: () => boolean;
@@ -205,6 +207,7 @@ export class SystemStatusApplicationService {
         ? "READY"
         : "DEGRADED";
     return {
+      ...(this.dependencies.buildId === undefined ? {} : { buildId: this.dependencies.buildId }),
       service: {
         name: SERVICE_NAME,
         readiness,

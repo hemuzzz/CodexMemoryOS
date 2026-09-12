@@ -136,6 +136,31 @@ h3 {
 .app-shell.sidebar-collapsed {
   --sidebar-width: 48px;
 }
+.app-shell.desktop-mac {
+  --window-chrome-height: 38px;
+  padding-top: var(--window-chrome-height);
+}
+.desktop-mac.sidebar-collapsed {
+  --sidebar-width: 88px;
+}
+.window-drag-region {
+  position: fixed;
+  inset: 0 0 auto;
+  height: var(--window-chrome-height);
+  background: linear-gradient(to right,
+    var(--sidebar) 0 calc(var(--sidebar-width) - 1px),
+    var(--line) calc(var(--sidebar-width) - 1px) var(--sidebar-width),
+    var(--canvas) var(--sidebar-width));
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.desktop-mac .skip-link:focus {
+  top: calc(var(--window-chrome-height) + 8px);
+}
+.desktop-mac .preview-dialog.full-detail {
+  top: var(--window-chrome-height);
+  height: calc(100dvh - var(--window-chrome-height));
+}
 .sidebar {
   display: flex;
   flex-direction: column;

@@ -188,6 +188,62 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 \
 
 使用 `Ctrl-C`（SIGINT）停止前台进程；进程管理器也可发送 SIGTERM。Server 会关闭 HTTP 连接、Watcher 和 SQLite 连接。应先启动 Server，再启动依赖它的 Codex MCP Client；不要为此项目额外建设守护进程或服务管理平台。
 
+### macOS 独立 App（个人本机）
+
+桌面源码位于 `apps/desktop/`，使用 Electron 44.3.0 管理窗口与普通 Node 子进程。后端继续使用本机 Node 22.16.0，知识、SQLite 和授权配置留在原处。关闭窗口保留 MCP，点击 Dock 恢复窗口；菜单退出或 `Cmd+Q` 等待后端正常结束。正式使用前正常停止占用同一端口的旧开发服务。
+
+桌面端点击知识正文中的本地源码链接时，会剥离 `:行号` / `:行号:列号` 或 `#L行号` 定位后缀，用系统默认文本编辑器打开文件；暂不自动定位到指定行。支持 `/Users/`、`/Volumes/`、`/private/`、`/tmp/`、`/var/`、`/opt/` 下的绝对路径和本地 `file:` 链接（仅对已渲染为链接的内容生效）。外部 HTTP(S) 链接仍由用户选择后交给系统浏览器。不存在的文件、未知站内路径及打开失败会在当前窗口显示错误，保留阅读页面；不会将 API 或源码路径加载为主页面。浏览器版 Hub 不具备桌面文件打开能力。
+
+从 0.2.0 开始，安装在 `/Applications/CodexMemoryOS.app` 的应用可通过菜单 **CodexMemoryOS → 检查更新** 查询公开仓库 `hemuzzz/CodexMemoryOS` 的最新稳定 GitHub Release。选择下载后，应用校验大小、SHA-256、版本、架构与应用身份，再由用户点击“安装并重启”。独立安装器复用原有正常退出、替换和启动检查，保留已安装应用的本机配置；知识文件和数据库不打入发布包，也不随升级迁移。下载失败不会替换应用；替换后启动失败保留旧程序备份并提示日志，不自动降级数据库。版本与当前相同或更低时不重复安装。
+
+这是无 Apple 签名证书的个人自用更新实现，依赖固定 GitHub 仓库的 HTTPS 发布信息和包校验，不代表 Apple 签名或公证。当前不做后台自动检查；关闭窗口继续保留服务，检查更新及错误提示使用原生应用菜单和对话框。原有 0.1.0 需要先手动安装一次带更新入口的本机安装包。
+
+首次准备：复制 [本机配置示例](apps/desktop/local-runtime.example.json) 到根目录 `.desktop-local.json`，填写真实 Node 绝对路径、现有数据/配置/日志路径与端口；该文件已忽略，不提交。Finder 启动不依赖终端 PATH。App 中保存配置快照；本机路径变化后需重新构建更新。
+
+只构建 App，不安装或启动真实服务：
+
+```bash
+npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm install --frozen-lockfile
+npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm build
+npx -y -p node@22.16.0 -p pnpm@11.1.3 \
+  pnpm --filter @codex-memory-os/desktop package:mac
+```
+
+输出位于 `dist/desktop/<本次输出目录>/CodexMemoryOS.app`。使用以下命令在临时数据和临时端口上验证指定产物的 Node/HTTP MCP 链路，不连接真实库：
+
+```bash
+npx -y -p node@22.16.0 -p pnpm@11.1.3 \
+  pnpm --filter @codex-memory-os/desktop smoke:package '/绝对路径/CodexMemoryOS.app'
+```
+
+准备在线发布时，先提升 `apps/desktop/package.json` 中的版本号，再构建并生成产物（此命令不上传或安装）：
+
+```bash
+npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm build
+npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/desktop release:mac
+```
+
+输出位于 `dist/desktop/release-*/`：
+
+- `CodexMemoryOS-<版本>-<架构>-local-install.dmg`：本机首次安装包，含本机路径配置，**不得上传公开 Release**。
+- `CodexMemoryOS-<版本>-<架构>-update.dmg` 和同名前缀的 `.json`：可发布的更新映像及校验信息；已移除本机配置和 pnpm 本机路径元数据。两者必须一起上传到标签为 `v<版本>` 的稳定 Release。
+- 同目录 `.app` 也含本机配置，仅供本机使用，不上传。
+
+涉及数据库 schema、已安装 Hook/Skill/MCP 配套或其他需要人工切换的版本，生成时显式指定本机配置绝对路径并加 `--manual-only`；应用只提示查看版本说明，不自动安装。发布前仍须核对源码、构建、配套兼容与实际验证边界；生成文件不等于获准公开发布，Git commit/push 另遵循用户约束。
+
+临时 macOS 安装目录的 A→B 升级验证入口为 `pnpm --filter @codex-memory-os/desktop smoke:update:mac '/绝对路径/本机App'`（仍使用上文固定 Node/pnpm 包装）。它只启动独立测试 bundle 和临时知识库，不替换 `/Applications` 中的应用。
+
+本机安装或更新入口如下；执行它会写入 `/Applications/CodexMemoryOS.app` 并启动真实配置对应的服务。先结束同库工程交付与 Hook/CLI 作业；更新期间不要重新打开旧 App。涉及数据库或协议变化时先按既有流程完成人工配套维护，本命令不执行迁移或覆盖个人配置。
+
+```bash
+./scripts/update-app.sh
+# 也可传入本机配置文件路径：./scripts/update-app.sh /绝对路径/local-runtime.json
+```
+
+更新锁覆盖依赖准备、构建与替换；正式目标固定为 `local.codexmemoryos.desktop`。脚本在临时工作区组装依赖，验证 SQLite 与 MCP，正常请求旧 App 退出，再在同一安装父目录保留旧程序并换入新包；成功须满足目标 buildId 与就绪条件。关闭超时、构建失败或身份不符会停止；不自动强杀、修改端口或回退数据库。不可写的安装目录、遗留更新锁和 macOS 退出请求被拒绝会给出错误，由操作者处理后重试。
+
+旧包仅作本次替换恢复，路径在更新结果中返回；更新成功不等于旧程序可兼容当前数据库。已安装 Hook/Skill/CLI 继续按实际变更人工维护，不因打包自动全量覆盖。当前实现与已验收/未验收边界见 [桌面实现验证记录](项目文档/验证记录/09-macOS桌面实现与隔离验证.md)。
+
 ## Codex Hook 与 MCP（2.4 源码）
 
 新版源码取消业务Task、Session/Turn、Loadout依赖。Hook将真实cwd项目和明确预授权项目交付为持续能力，附项目名称、别名、说明；不解析Prompt、不自动执行Recall。Recall Skill自动识别项目业务、表/接口、故障与历史判断请求，先召回，再核对当前源码；每次只选择相关能力，不受会话cwd限制。2026-09-09已完成本机真实能力传递、别名选择、双项目召回与Used结算验收，用户确认本轮验收成功、无阻碍；模型路径参数不授予权限。

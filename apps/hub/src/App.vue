@@ -9,6 +9,7 @@ import FilterMenu from "./components/FilterMenu.vue";
 import { navigate, useRoute, type Page } from "./navigation.js";
 const route = useRoute();
 const collapsed = ref(false);
+const desktopMac = navigator.userAgent.includes("CodexMemoryOSDesktop/1");
 const theme = ref<"system" | "light" | "dark">("dark");
 const navigation: { page: Page; label: string; icon: string }[] = [
   { page: "overview", label: "总览", icon: "overview" },
@@ -59,7 +60,8 @@ onMounted(() => {
 onBeforeUnmount(() => window.removeEventListener("keydown", shortcut));
 </script>
 <template>
-  <div class="app-shell" :class="{ 'sidebar-collapsed': collapsed }">
+  <div class="app-shell" :class="{ 'sidebar-collapsed': collapsed, 'desktop-mac': desktopMac }">
+    <div v-if="desktopMac" class="window-drag-region" aria-hidden="true"></div>
     <a class="skip-link" href="#main-content" @click.prevent="documentMainFocus"
       >跳到主要内容</a
     >

@@ -198,7 +198,7 @@ test("real REST Diff budgets remain read-only and concurrent ordinary REST/MCP r
   const { startCodexMemoryOsServer } = await import("../src/runtime.js");
   const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
-  const { TaskRepository, TaskApplicationService } = await import("../src/task/index.js");
+  const { migrateKnowledge } = await import("../src/knowledge/repository.js");
   const reservation = createServer();
   await new Promise<void>(resolve => reservation.listen(0, "127.0.0.1", resolve));
   const address = reservation.address(); assert.ok(address && typeof address !== "string");
@@ -206,14 +206,12 @@ test("real REST Diff budgets remain read-only and concurrent ordinary REST/MCP r
   let runtime: Awaited<ReturnType<typeof startCodexMemoryOsServer>> | undefined;
   let client: InstanceType<typeof Client> | undefined;
   try {
+    migrateKnowledge(f.databasePath, false, true);
     const a = source("old-line\n".repeat(1990)), b = source("new-line\n".repeat(1990));
     await f.candidate(a); await confirmInboxAsset(input(a), f);
     await f.candidate(b); await confirmInboxAsset(input(b, a), f);
     runtime = await startCodexMemoryOsServer({ assetRepositoryPath: f.repositoryPath, databasePath: f.databasePath,
       workspaceConfigPath: f.workspaceConfigPath, logPath: join(f.root, "runtime.log"), port: address.port });
-    const repository = new TaskRepository(f.databasePath);
-    const taskId = new TaskApplicationService(repository).resolveTask({ sourceSessionId: "diff-test", sourceTurnId: "turn-1", workspace: null, request: "diff concurrency" }).task.taskId;
-    repository.close();
     client = new Client({ name: "content-diff-test", version: "0.0.0" });
     // Same SDK exactOptionalPropertyTypes mismatch as the existing MCP transport fixture.
     await client.connect(new StreamableHTTPClientTransport(new URL(runtime.endpoint)) as unknown as Transport);
@@ -229,19 +227,23 @@ test("real REST Diff budgets remain read-only and concurrent ordinary REST/MCP r
       assert.deepEqual(body.data.diff, { assetId: id, status: "WORK_LIMIT_EXCEEDED" });
     });
     const ordinaryRest = fetch(new URL("/api/assets", url)).then(r => assert.equal(r.status, 200));
-    const ordinaryMcp = client.callTool({ name: "asset_read", arguments: { taskId, assetId: id } }).then(r => {
+    const ordinaryMcp = client.callTool({ name: "asset_read", arguments: { capabilityIds: [], assetId: id } }).then(r => {
       assert.equal(r.isError, undefined);
-      assert.ok(typeof r.structuredContent === "object" && r.structuredContent !== null && "ok" in r.structuredContent);
-      assert.equal(r.structuredContent.ok, true);
-      assert.doesNotMatch(JSON.stringify(r.structuredContent), /old-line/);
+      const content = r.content as { type: string; text?: string }[];
+      assert.equal(content[0]?.type, "text");
+      const read = JSON.parse(content[0]!.text!) as { markdown: string; usageRecorded: boolean };
+      assert.equal(read.usageRecorded, true);
+      assert.match(read.markdown, /new-line/);
+      assert.doesNotMatch(read.markdown, /old-line/);
     });
     await Promise.all([...requests, ordinaryRest, ordinaryMcp]);
     console.log(`12 concurrent Diff + REST/MCP: ${(performance.now() - started).toFixed(1)} ms`);
     const db = new Database(f.databasePath);
     try {
       assert.equal((db.prepare("SELECT count(*) AS n FROM asset_content_version").get() as {n: number}).n, 2);
-      // Diff never contributes Usage; only the explicit asset_read above does.
-      assert.equal((db.prepare("SELECT count(*) AS n FROM task_asset_usage").get() as {n:number}).n, 1);
+      // Diff writes no facts; only the explicit Read above records a read operation.
+      assert.equal((db.prepare("SELECT count(*) AS n FROM read_operation").get() as {n:number}).n, 1);
+      assert.equal((db.prepare("SELECT count(*) AS n FROM used_event").get() as {n:number}).n, 0);
     } finally { db.close(); }
   } finally { await client?.close(); await runtime?.close(); await f.cleanup(); }
 });

@@ -1,6 +1,12 @@
 <script setup lang="ts">
 defineProps<{ name: string }>();
 const paths: Record<string, string> = {
+  folder: "M3 7V5h6l2 2h10v13H3V7Z",
+  database: "M20 5c0 2-3.6 3-8 3S4 7 4 5s3.6-3 8-3 8 1 8 3ZM4 5v14c0 2 3.6 3 8 3s8-1 8-3V5M4 12c0 2 3.6 3 8 3s8-1 8-3",
+  chevron: "m9 5 7 7-7 7",
+  plus: "M12 5v14M5 12h14",
+  minus: "M5 12h14",
+  fit: "M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5",
   overview: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
   close: "M18 6 6 18M6 6l12 12",
   panel:

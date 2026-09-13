@@ -6,6 +6,28 @@ Native Memories 提供客户端历史背景，本服务维护经人工确认、�
 
 当前 2.4 提供多表达召回、显式多 Workspace 能力选择、Recall/Read/Used、只读 Hub/REST、HTTP MCP 和单文件人工确认命令，本机已完成 2.4 切换。工程交付另有知识评估短记录与 Stop 非阻断提醒，见下文。它不依赖模型 API、MemoryProxy、Obsidian 或团队服务，也不会由 Hook 自动捕获、自动确认或批量确认知识。Hub 只读，不提供确认、编辑、移动或删除操作。
 
+## 打包与本机更新
+
+在仓库根目录执行，需先完成下文的本机配置。
+
+**打包 DMG（仅生成文件，不安装或上传）：**
+
+```bash
+npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm build
+npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/desktop release:mac
+```
+
+产物位于 `dist/desktop/release-*/`，本机安装使用 `*-local-install.dmg`。
+
+**一键更新本机应用（重新构建、替换并启动）：**
+
+```bash
+./scripts/update-app.sh
+# 指定其他本机配置时：./scripts/update-app.sh /绝对路径/local-runtime.json
+```
+
+更新目标为 `/Applications/CodexMemoryOS.app`，保留本机配置与知识数据。执行前先结束使用同一知识库的工程任务和 Hook/CLI 作业，更新期间不要重新打开旧应用。涉及数据库或协议变化时，须先完成人工配套维护；脚本不执行迁移。应用内的“检查更新”需要 GitHub Release 已发布新版后才能下载升级。
+
 ## 项目文档
 
 设计方案、工程约定、审查与验证记录统一见 [项目文档索引](项目文档/文档索引.md)。新增或整理文档时遵循 [文档约定](工程约定/文档约定.md)，Agent 工作规则见 [AGENTS.md](AGENTS.md)。
@@ -216,12 +238,7 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 \
   pnpm --filter @codex-memory-os/desktop smoke:package '/绝对路径/CodexMemoryOS.app'
 ```
 
-准备在线发布时，先提升 `apps/desktop/package.json` 中的版本号，再构建并生成产物（此命令不上传或安装）：
-
-```bash
-npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm build
-npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/desktop release:mac
-```
+准备在线发布时，先提升 `apps/desktop/package.json` 中的版本号，再执行文首的[打包命令](#打包与本机更新)（不上传或安装）。
 
 输出位于 `dist/desktop/release-*/`：
 
@@ -233,12 +250,7 @@ npx -y -p node@22.16.0 -p pnpm@11.1.3 pnpm --filter @codex-memory-os/desktop rel
 
 临时 macOS 安装目录的 A→B 升级验证入口为 `pnpm --filter @codex-memory-os/desktop smoke:update:mac '/绝对路径/本机App'`（仍使用上文固定 Node/pnpm 包装）。它只启动独立测试 bundle 和临时知识库，不替换 `/Applications` 中的应用。
 
-本机安装或更新入口如下；执行它会写入 `/Applications/CodexMemoryOS.app` 并启动真实配置对应的服务。先结束同库工程交付与 Hook/CLI 作业；更新期间不要重新打开旧 App。涉及数据库或协议变化时先按既有流程完成人工配套维护，本命令不执行迁移或覆盖个人配置。
-
-```bash
-./scripts/update-app.sh
-# 也可传入本机配置文件路径：./scripts/update-app.sh /绝对路径/local-runtime.json
-```
+本机安装或更新使用文首的[一键更新命令](#打包与本机更新)，会写入 `/Applications/CodexMemoryOS.app` 并启动真实配置对应的服务。
 
 更新锁覆盖依赖准备、构建与替换；正式目标固定为 `local.codexmemoryos.desktop`。脚本在临时工作区组装依赖，验证 SQLite 与 MCP，正常请求旧 App 退出，再在同一安装父目录保留旧程序并换入新包；成功须满足目标 buildId 与就绪条件。关闭超时、构建失败或身份不符会停止；不自动强杀、修改端口或回退数据库。不可写的安装目录、遗留更新锁和 macOS 退出请求被拒绝会给出错误，由操作者处理后重试。
 
